@@ -24,10 +24,6 @@
       "Description": "i18n:command_issues_description"
     },
     {
-      "Command": "search",
-      "Description": "i18n:command_search_description"
-    },
-    {
       "Command": "notifications",
       "Description": "i18n:command_notifications_description"
     }
@@ -48,19 +44,6 @@
     },
     {
       "Type": "newline"
-    },
-    {
-      "Type": "textbox",
-      "Value": {
-        "Key": "defaultSearchTerms",
-        "Label": "i18n:setting_default_search_terms_label",
-        "Tooltip": "i18n:setting_default_search_terms_tooltip",
-        "DefaultValue": "author:@me",
-        "MaxLines": 1,
-        "Style": {
-          "Width": 360
-        }
-      }
     },
     {
       "Type": "textbox",
@@ -217,16 +200,13 @@
       "plugin_name": "GitHub",
       "plugin_description": "Manage GitHub issues and notifications",
       "command_issues_description": "List your GitHub issues",
-      "command_search_description": "Search GitHub issues",
       "command_notifications_description": "Manage GitHub notifications",
       "setting_pat_label": "Personal Access Token",
       "setting_pat_tooltip": "GitHub classic PAT with scopes repo, notifications, read:org, read:user",
-      "setting_default_search_terms_label": "Default Search Terms",
-      "setting_default_search_terms_tooltip": "Applied to the `search` command before your typed text. Example: author:@me",
       "setting_number_of_results_label": "Number of Results",
-      "setting_number_of_results_tooltip": "How many issues to fetch per command",
+      "setting_number_of_results_tooltip": "How many issues or notifications to fetch per command",
       "setting_issue_sort_label": "Issue Sort",
-      "setting_issue_sort_tooltip": "Sort order used by `issues` and `search`",
+      "setting_issue_sort_tooltip": "Sort order used by `issues`",
       "sort_updated_desc": "Recently Updated",
       "sort_updated_asc": "Least Recently Updated",
       "sort_created_desc": "Newest",
@@ -271,7 +251,6 @@
       "action_copy_required_scopes": "Copy Required Scopes",
       "action_go_to_my_issues": "Go to My Issues",
       "action_open_my_issues": "Open My Issues",
-      "action_search_issues": "Search Issues",
       "action_open_notifications": "Open Notifications",
       "action_open_in_browser": "Open in Browser",
       "action_copy_issue_url": "Copy Issue URL",
@@ -303,8 +282,6 @@
       "notify_marked_all_notifications_read": "Marked all notifications as read",
       "home_my_issues_title": "My Issues",
       "home_my_issues_subtitle": "List issues created by you, assigned to you, or mentioning you",
-      "home_search_issues_title": "Search Issues",
-      "home_search_issues_subtitle": "Run a global issue search using your default search qualifiers",
       "home_notifications_title": "Notifications",
       "home_notifications_subtitle": "Manage unread and read GitHub notifications",
       "group_setup": "Setup",
@@ -315,7 +292,6 @@
       "group_mentioned": "Mentioned",
       "group_recently_closed": "Recently Closed",
       "group_issues": "Issues",
-      "group_search_results": "Search Results",
       "group_unread": "Unread",
       "group_read": "Read",
       "group_notifications": "Notifications",
@@ -335,9 +311,6 @@
       "empty_issues_title": "No matching issues",
       "empty_issues_with_search": "No issues matched \"%s\"",
       "empty_issues_default": "No issues matched the current settings",
-      "empty_search_title": "No search results",
-      "empty_search_with_search": "No issues matched \"%s\" and your default qualifiers",
-      "empty_search_default": "No issues matched the default search qualifiers",
       "empty_notifications_title": "No notifications found",
       "empty_notifications_with_search": "No notifications matched \"%s\"",
       "empty_notifications_default": "No notifications matched the current filters",
@@ -368,16 +341,13 @@
       "plugin_name": "GitHub",
       "plugin_description": "管理 GitHub 的 issues 和通知",
       "command_issues_description": "查看你的 GitHub issues",
-      "command_search_description": "搜索 GitHub issues",
       "command_notifications_description": "管理 GitHub 通知",
       "setting_pat_label": "Personal Access Token",
       "setting_pat_tooltip": "GitHub classic PAT，至少包含 repo、notifications、read:org、read:user 权限",
-      "setting_default_search_terms_label": "默认搜索词",
-      "setting_default_search_terms_tooltip": "会先附加到 `search` 命令，再拼接你输入的搜索词，例如 author:@me",
       "setting_number_of_results_label": "结果数量",
-      "setting_number_of_results_tooltip": "每次命令最多拉取多少条 issue",
+      "setting_number_of_results_tooltip": "每次命令最多拉取多少条 issue 或通知",
       "setting_issue_sort_label": "Issue 排序",
-      "setting_issue_sort_tooltip": "`issues` 和 `search` 命令使用的排序方式",
+      "setting_issue_sort_tooltip": "`issues` 命令使用的排序方式",
       "sort_updated_desc": "最近更新优先",
       "sort_updated_asc": "最久未更新优先",
       "sort_created_desc": "最新创建优先",
@@ -422,7 +392,6 @@
       "action_copy_required_scopes": "复制所需权限",
       "action_go_to_my_issues": "进入我的 Issues",
       "action_open_my_issues": "打开我的 Issues",
-      "action_search_issues": "搜索 Issues",
       "action_open_notifications": "打开通知",
       "action_open_in_browser": "在浏览器中打开",
       "action_copy_issue_url": "复制 Issue URL",
@@ -454,8 +423,6 @@
       "notify_marked_all_notifications_read": "已将所有通知标记为已读",
       "home_my_issues_title": "我的 Issues",
       "home_my_issues_subtitle": "查看你创建、分配给你或提到你的 issues",
-      "home_search_issues_title": "搜索 Issues",
-      "home_search_issues_subtitle": "使用默认搜索限定词进行全局 issue 搜索",
       "home_notifications_title": "通知",
       "home_notifications_subtitle": "管理未读和已读的 GitHub 通知",
       "group_setup": "配置",
@@ -466,7 +433,6 @@
       "group_mentioned": "提到我的",
       "group_recently_closed": "最近关闭",
       "group_issues": "Issues",
-      "group_search_results": "搜索结果",
       "group_unread": "未读",
       "group_read": "已读",
       "group_notifications": "通知",
@@ -486,9 +452,6 @@
       "empty_issues_title": "没有匹配的 Issues",
       "empty_issues_with_search": "没有匹配“%s”的 issues",
       "empty_issues_default": "当前设置下没有匹配的 issues",
-      "empty_search_title": "没有搜索结果",
-      "empty_search_with_search": "没有 issue 匹配“%s”以及当前默认搜索限定词",
-      "empty_search_default": "没有 issue 匹配当前默认搜索限定词",
       "empty_notifications_title": "没有找到通知",
       "empty_notifications_with_search": "没有通知匹配“%s”",
       "empty_notifications_default": "当前过滤条件下没有通知",

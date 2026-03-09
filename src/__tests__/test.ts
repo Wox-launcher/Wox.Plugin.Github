@@ -11,6 +11,14 @@ describe("parsePluginQuery", () => {
     })
   })
 
+  test("treats removed search command as plain home search text", () => {
+    expect(parsePluginQuery(undefined, "search bug")).toEqual({
+      mode: "home",
+      search: "search bug",
+      unreadOnly: false
+    })
+  })
+
   test("parses notifications unread shortcut from search text", () => {
     expect(parsePluginQuery(undefined, "notifications unread triage")).toEqual({
       mode: "notifications",

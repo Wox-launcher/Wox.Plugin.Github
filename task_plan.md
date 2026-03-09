@@ -4,7 +4,7 @@
 Build a Wox Node.js GitHub plugin that mirrors the core logic of Raycast's GitHub extension for issue and notification management, using Personal Access Token authentication.
 
 ## Current Phase
-Phase 5
+Phase 6
 
 ## Phases
 ### Phase 1: Requirements & Discovery
@@ -38,6 +38,13 @@ Phase 5
 - [x] Deliver to user
 - **Status:** complete
 
+### Phase 6: Scope Reduction & Request Consolidation
+- [x] Remove search command and related user-facing settings/docs
+- [x] Consolidate My Issues fetching into a single GitHub request while preserving sections
+- [x] Consolidate Notifications rendering to avoid per-item follow-up requests
+- [x] Re-run tests/build and summarize deltas
+- **Status:** complete
+
 ## Key Questions
 1. Which Raycast commands and behaviors for issues/notifications should be preserved in Wox's single-query UX?
 2. Which Wox settings schema best supports PAT-based authentication and default GitHub filters?
@@ -53,6 +60,7 @@ Phase 5
 | Support core issue actions only: open, assign/unassign self, close, reopen, copy URL | These are the highest-value actions from Raycast's issue flow and map cleanly to Wox actions |
 | Support core notification actions only: open, mark read, mark done, unsubscribe, mark all read | These are the main Raycast notification actions and are implementable with GitHub notification APIs |
 | Extract notification formatting helpers into a pure module | Keeps Jest away from Octokit's ESM runtime while preserving unit tests for query and URL formatting |
+| Remove `search` from the command surface | The current version should focus only on `My Issues` and `Notifications`, matching the user's narrowed scope |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -60,6 +68,7 @@ Phase 5
 | Planning files were missing | 1 | Create task_plan.md, findings.md, and progress.md before substantial implementation |
 | Partial git clone could not materialize blobs inside the sandbox | 1 | Switched to direct raw file fetches with escalated `curl -L` |
 | Jest could not parse Octokit's ESM entrypoints | 1 | Moved pure notification helpers into a separate module that can be tested without importing Octokit |
+| `pnpm build` failed on Node.js v25 because `fs.rmdirSync(..., { recursive: true })` is no longer supported | 1 | Updated the clean script to use `fs.rmSync(..., { recursive: true, force: true })` |
 
 ## Notes
 - Re-read this plan before major decisions.

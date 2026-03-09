@@ -11,8 +11,6 @@ import {
   getIssueAssigneeLogins,
   getIssueRepositoryFullName,
   getMyIssues,
-  getNotificationSubjectState,
-  getViewer,
   invalidateIssueCaches,
   invalidateNotificationCaches,
   listNotifications,
@@ -21,13 +19,11 @@ import {
   markNotificationAsRead,
   matchesIssueSearch,
   matchesNotificationSearch,
-  primeNotificationSubjectStates,
   reopenIssue,
-  searchIssues,
   unassignIssueFromViewer,
   unsubscribeFromNotification
 } from "./github"
-import { buildNotificationUrl, getNotificationReasonTranslationKey, getNotificationTypeTranslationKey, NotificationSubjectState } from "./github-format"
+import { buildNotificationUrl, getNotificationReasonTranslationKey, getNotificationTypeTranslationKey } from "./github-format"
 import {
   IconActionAccept,
   IconActionAssign,
@@ -37,7 +33,6 @@ import {
   IconActionMarkRead,
   IconActionOpenExternal,
   IconActionReopen,
-  IconActionSearch,
   IconActionSkip,
   IconActionUnassign,
   IconActionUnsubscribe,
@@ -45,7 +40,6 @@ import {
   IconIssueClosed,
   IconIssueOpen,
   IconNotificationInbox,
-  IconPullRequestMerged,
   IconPullRequestOpen,
   IconRepositoryTag
 } from "./icons"
@@ -91,19 +85,11 @@ function issueIcon(issue: GitHubIssue): WoxImage {
   return IconIssueOpen
 }
 
-function notificationIcon(notification: GitHubNotification, subjectState: NotificationSubjectState): WoxImage {
+function notificationIcon(notification: GitHubNotification): WoxImage {
   switch (notification.subject.type) {
     case "Issue":
-      return subjectState === "closed" ? IconIssueClosed : IconIssueOpen
+      return IconIssueOpen
     case "PullRequest":
-      if (subjectState === "merged") {
-        return IconPullRequestMerged
-      }
-
-      if (subjectState === "closed") {
-        return IconIssueClosed
-      }
-
       return IconPullRequestOpen
     case "RepositoryInvitation":
       return IconNotificationInbox
@@ -151,8 +137,6 @@ function getIssueGroupTranslationKey(group: string): string {
       return "group_mentioned"
     case "Recently Closed":
       return "group_recently_closed"
-    case "Search Results":
-      return "group_search_results"
     default:
       return "group_issues"
   }
@@ -341,13 +325,6 @@ async function buildHomeResults(ctx: Context, query: Query, parsed: ParsedPlugin
     },
     {
       Id: makeResultId(),
-      Title: await t(ctx, "home_search_issues_title"),
-      SubTitle: await t(ctx, "home_search_issues_subtitle"),
-      Icon: IconRepositoryTag,
-      Actions: [changeQueryAction(buildCommandQuery(query, "search"), await t(ctx, "action_search_issues"), IconActionSearch, true)]
-    },
-    {
-      Id: makeResultId(),
       Title: await t(ctx, "home_notifications_title"),
       SubTitle: await t(ctx, "home_notifications_subtitle"),
       Icon: IconNotificationInbox,
@@ -520,7 +497,6 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
   const notificationUrl = buildNotificationUrl(notification)
   const actions: ResultAction[] = []
   const isInvitation = notification.subject.type === "RepositoryInvitation"
-  const subjectState = getNotificationSubjectState(settings, notification)
   const typeText = await getNotificationTypeText(ctx, notification)
   const reasonText = await getNotificationReasonText(ctx, notification)
 
@@ -629,7 +605,7 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
     Id: makeResultId(),
     Title: notification.subject.title,
     SubTitle: await getNotificationSubtitleText(ctx, notification),
-    Icon: notificationIcon(notification, subjectState),
+    Icon: notificationIcon(notification),
     Group: await t(ctx, notification.unread ? "group_unread" : "group_read"),
     GroupScore: notification.unread ? 200 : 100,
     Score: toScore(notification.updated_at),
@@ -649,9 +625,9 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
 }
 
 async function queryIssues(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<Result[]> {
-  const [viewer, sections] = await Promise.all([getViewer(settings), getMyIssues(settings)])
-  const resultPromises = sections.flatMap(section =>
-    section.issues.filter(issue => matchesIssueSearch(issue, parsed.search)).map(issue => buildIssueResult(ctx, query, settings, viewer.login, issue, section.group, section.groupScore))
+  const issueData = await getMyIssues(settings)
+  const resultPromises = issueData.sections.flatMap(section =>
+    section.issues.filter(issue => matchesIssueSearch(issue, parsed.search)).map(issue => buildIssueResult(ctx, query, settings, issueData.viewerLogin, issue, section.group, section.groupScore))
   )
   const results = await Promise.all(resultPromises)
 
@@ -669,23 +645,6 @@ async function queryIssues(ctx: Context, query: Query, settings: PluginSettings,
   ]
 }
 
-async function querySearch(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<Result[]> {
-  const [viewer, issues] = await Promise.all([getViewer(settings), searchIssues(settings, parsed.search)])
-
-  if (issues.length === 0) {
-    return [
-      emptyStateResult(
-        await t(ctx, "empty_search_title"),
-        parsed.search ? await tf(ctx, "empty_search_with_search", parsed.search) : await t(ctx, "empty_search_default"),
-        await t(ctx, "group_search_results"),
-        100
-      )
-    ]
-  }
-
-  return await Promise.all(issues.map(issue => buildIssueResult(ctx, query, settings, viewer.login, issue, "Search Results", 100)))
-}
-
 async function queryNotifications(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<Result[]> {
   const notifications = (await listNotifications(settings))
     .filter(notification => !parsed.unreadOnly || notification.unread)
@@ -699,8 +658,6 @@ async function queryNotifications(ctx: Context, query: Query, settings: PluginSe
       const listed = settings.repositoryList.includes(repository)
       return settings.repositoryFilterMode === "include" ? listed : !listed
     })
-
-  await primeNotificationSubjectStates(settings, notifications)
 
   const unreadCount = notifications.filter(notification => notification.unread).length
   const results = await Promise.all(notifications.map(notification => buildNotificationResult(ctx, query, settings, notification, unreadCount > 1)))
@@ -725,7 +682,6 @@ export const plugin: Plugin = {
     await api.OnSettingChanged(ctx, async (_settingCtx, key) => {
       if (
         key === "personalAccessToken" ||
-        key === "defaultSearchTerms" ||
         key === "numberOfResults" ||
         key === "issueSort" ||
         key === "showCreated" ||
@@ -756,8 +712,6 @@ export const plugin: Plugin = {
       switch (parsed.mode) {
         case "issues":
           return await queryIssues(ctx, query, settings, parsed)
-        case "search":
-          return await querySearch(ctx, query, settings, parsed)
         case "notifications":
           return await queryNotifications(ctx, query, settings, parsed)
         case "home":

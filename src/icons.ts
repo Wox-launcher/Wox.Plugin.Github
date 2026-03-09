@@ -37,12 +37,6 @@ const IconRepositoryTag = {
     '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 16 16"><path fill="currentColor" d="M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.75 1.75 0 0 1 1 7.775m1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2a1 1 0 0 1 0-2"/></svg>'
 } as WoxImage
 
-const IconPullRequestMerged = {
-  ImageType: "svg",
-  ImageData:
-    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 16 16"><path fill="#8759E1" d="M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.73 5.73 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218M4.25 13.5a.75.75 0 1 0 0-1.5a.75.75 0 0 0 0 1.5m8.5-4.5a.75.75 0 1 0 0-1.5a.75.75 0 0 0 0 1.5M5 3.25a.75.75 0 1 0 0 .005z"/></svg>'
-} as WoxImage
-
 const IconPullRequestOpen = {
   ImageType: "svg",
   ImageData:
@@ -74,8 +68,6 @@ const IconActionReopen = createSvgIcon(
   "M8 1a7 7 0 1 1-6.93 8H2.6a.75.75 0 0 0 0-1.5H.75A.75.75 0 0 0 0 8.25V10.1a.75.75 0 0 0 1.5 0V9A5.5 5.5 0 1 0 8 2.5c-1.64 0-3.11.72-4.12 1.87a.75.75 0 1 0 1.12 1C5.72 4.47 6.8 4 8 4a4 4 0 1 1-4 4a.75.75 0 0 0-1.5 0A5.5 5.5 0 0 0 8 13.5A5.5 5.5 0 0 0 8 2.5",
   "#2563EB"
 )
-const IconActionSearch = createSvgIcon("M11.25 6.5a4.75 4.75 0 1 1-9.5 0a4.75 4.75 0 0 1 9.5 0m-1.029 4.782a6.25 6.25 0 1 1 1.06-1.06l3.248 3.248a.75.75 0 1 1-1.06 1.06z", "#4B5563")
-
 const IconActionMarkRead = createSvgIcon(
   "M1.75 3h12.5c.69 0 1.25.56 1.25 1.25v7.5c0 .69-.56 1.25-1.25 1.25H1.75A1.25 1.25 0 0 1 .5 11.75v-7.5C.5 3.56 1.06 3 1.75 3m0 1.5a.25.25 0 0 0-.157.055L8 9.673l6.407-5.118a.25.25 0 0 0-.157-.055zm12.25 7v-5.03l-5.53 4.423a.75.75 0 0 1-.938 0L2 6.47v5.03z",
   "#2563EB"
@@ -99,7 +91,6 @@ export {
   IconIssueClosed,
   IconNotificationInbox,
   IconRepositoryTag,
-  IconPullRequestMerged,
   IconPullRequestOpen,
   IconActionOpenExternal,
   IconActionCopy,
@@ -108,7 +99,6 @@ export {
   IconActionClose,
   IconActionSkip,
   IconActionReopen,
-  IconActionSearch,
   IconActionMarkRead,
   IconActionDone,
   IconActionUnsubscribe,

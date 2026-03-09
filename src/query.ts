@@ -4,8 +4,7 @@ const COMMAND_ALIASES: Record<string, QueryMode> = {
   issue: "issues",
   issues: "issues",
   notification: "notifications",
-  notifications: "notifications",
-  search: "search"
+  notifications: "notifications"
 }
 
 function normalizeSearch(input: string): string {
@@ -18,10 +17,6 @@ export function parsePluginQuery(command: string | undefined, search: string): P
 
   if (normalizedCommand === "issues") {
     return { mode: "issues", search: normalizedSearch, unreadOnly: false }
-  }
-
-  if (normalizedCommand === "search") {
-    return { mode: "search", search: normalizedSearch, unreadOnly: false }
   }
 
   if (normalizedCommand === "notifications") {

@@ -94,3 +94,18 @@
 | What have I done? | Completed implementation, verification, packaging, and delivery prep |
 
 *Update after completing each phase or encountering errors*
+# Progress Log
+
+## 2026-03-09
+
+- Reviewed planning files and skill instructions.
+- Confirmed current scope gap: home still shows `Search Issues`, query parser still accepts `search`, and search-specific settings/translations remain in `plugin.json`.
+- Confirmed request pattern gap:
+  - `My Issues` performs multiple REST search calls for created/assigned/mentioned/recently closed sections.
+  - `Notifications` performs one REST fetch plus GraphQL follow-up batches for subject state.
+- Next step: refactor command surface and GitHub data layer, then run tests/build.
+- Removed `search` from the command surface, plugin settings, translations, README usage docs, and parser behavior.
+- Reworked `My Issues` to use a single GraphQL request with aliased searches, then grouped and de-duplicated results locally.
+- Reworked `Notifications` to stay on a single REST list request and dropped subject-state priming requests.
+- Fixed the local build pipeline by replacing deprecated `fs.rmdirSync(..., { recursive: true })` with `fs.rmSync(..., { recursive: true, force: true })`.
+- Verification complete: `pnpm test -- --runInBand`, `pnpm lint`, and `pnpm build` all pass.

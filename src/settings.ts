@@ -3,7 +3,6 @@ import { Context, PublicAPI } from "@wox-launcher/wox-plugin"
 import { IssueSort, PluginSettings, RepositoryFilterMode } from "./types"
 
 export const DEFAULT_NUMBER_OF_RESULTS = 20
-export const DEFAULT_SEARCH_TERMS = "author:@me"
 export const DEFAULT_ISSUE_SORT: IssueSort = "updated-desc"
 
 export const ISSUE_SORT_OPTIONS: Array<{ label: string; value: IssueSort }> = [
@@ -68,9 +67,8 @@ export function parseRepositoryList(input: string | undefined): string[] {
 }
 
 export async function getSettings(ctx: Context, api: PublicAPI): Promise<PluginSettings> {
-  const [personalAccessToken, defaultSearchTerms, numberOfResults, issueSort, showCreated, showAssigned, showMentioned, showRecentlyClosed, repositoryFilterMode, repositoryList] = await Promise.all([
+  const [personalAccessToken, numberOfResults, issueSort, showCreated, showAssigned, showMentioned, showRecentlyClosed, repositoryFilterMode, repositoryList] = await Promise.all([
     api.GetSetting(ctx, "personalAccessToken"),
-    api.GetSetting(ctx, "defaultSearchTerms"),
     api.GetSetting(ctx, "numberOfResults"),
     api.GetSetting(ctx, "issueSort"),
     api.GetSetting(ctx, "showCreated"),
@@ -83,7 +81,6 @@ export async function getSettings(ctx: Context, api: PublicAPI): Promise<PluginS
 
   return {
     personalAccessToken: (personalAccessToken || "").trim(),
-    defaultSearchTerms: (defaultSearchTerms || DEFAULT_SEARCH_TERMS).trim(),
     numberOfResults: parseNumber(numberOfResults, DEFAULT_NUMBER_OF_RESULTS),
     issueSort: parseIssueSort(issueSort),
     showCreated: parseBoolean(showCreated, true),

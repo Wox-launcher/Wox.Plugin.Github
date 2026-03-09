@@ -10,11 +10,10 @@ export type RepositoryFilterMode = "all" | "include" | "exclude"
 
 export type IssueSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "comments-desc" | "comments-asc"
 
-export type QueryMode = "home" | "issues" | "search" | "notifications"
+export type QueryMode = "home" | "issues" | "notifications"
 
 export interface PluginSettings {
   personalAccessToken: string
-  defaultSearchTerms: string
   numberOfResults: number
   issueSort: IssueSort
   showCreated: boolean
@@ -29,6 +28,11 @@ export interface IssueSection {
   group: string
   groupScore: number
   issues: GitHubIssue[]
+}
+
+export interface MyIssuesResult {
+  sections: IssueSection[]
+  viewerLogin: string
 }
 
 export interface ParsedPluginQuery {

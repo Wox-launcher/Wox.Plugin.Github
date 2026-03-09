@@ -4,7 +4,6 @@ Wox plugin for GitHub issue and notification management, modeled after the core 
 
 - Personal Access Token authentication
 - My issues
-- Global issue search
 - Notification management
 
 ## Install
@@ -34,7 +33,6 @@ Quick token URL:
 gh
 gh issues
 gh issues flaky
-gh search author:@me label:bug
 gh notifications
 gh notifications unread
 gh notifications review
@@ -42,9 +40,8 @@ gh notifications review
 
 ## Settings
 
-- `Default Search Terms`: prepended to the `search` command
-- `Number of Results`: max issue count per request
-- `Issue Sort`: sorting for `issues` and `search`
+- `Number of Results`: max issues or notifications fetched per request
+- `Issue Sort`: sorting for `issues`
 - `Show Created / Assigned / Mentioned / Recently Closed`: controls groups in `issues`
 - `Repository Filter Mode` + `Repository List`: include or exclude repositories for issues and notifications
 

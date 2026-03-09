@@ -58,3 +58,14 @@
 - The extension README confirms PAT setup guidance and the preferred token creation URL, which is now mirrored in this plugin's setup flow and README.
 
 *Update this file after every 2 view/browser/search operations*
+# Findings
+
+## 2026-03-09 Scope Reduction Pass
+
+- `src/index.ts` still exposes a home-card and query handler for `search`; removing it requires coordinated changes in `src/query.ts`, `src/types.ts`, `plugin.json`, and `README.md`.
+- `getMyIssues()` currently uses `Promise.all()` over 3 to 6 independent REST issue searches, so the "My Issues" view fans out into multiple GitHub requests.
+- `queryNotifications()` already fetches the notification list in one REST call, but `primeNotificationSubjectStates()` issues extra GraphQL batches to refine subject state icons. Removing that priming step will keep notifications to one GitHub request.
+- `defaultSearchTerms` is only used by the removed `searchIssues()` flow; once `search` is dropped, that setting becomes dead config and should be removed from plugin metadata and docs.
+- Final implementation uses a single GraphQL request for `My Issues`, with aliased searches for created/assigned/mentioned/recently closed plus `viewer.login` in the same payload.
+- Notifications now use a single `activity.listNotificationsForAuthenticatedUser` call capped by `numberOfResults`; subject-state enrichment was intentionally removed to avoid follow-up requests.
+- `package.json` needed a compatibility fix because the repo's clean script used deprecated `fs.rmdirSync(..., { recursive: true })`, which fails under the current local Node.js v25 runtime.

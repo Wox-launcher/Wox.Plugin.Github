@@ -1,7 +1,7 @@
 import { Octokit } from "@octokit/rest"
 
-import { getNotificationReasonLabel, getNotificationSubjectStateFromApiData, getNotificationTypeTitle, NotificationSubjectState } from "./github-format"
-import { GitHubIssue, GitHubNotification, GitHubViewer, IssueSection, IssueSort, PluginSettings } from "./types"
+import { getNotificationReasonLabel, getNotificationTypeTitle } from "./github-format"
+import { GitHubIssue, GitHubNotification, GitHubViewer, IssueSection, IssueSort, MyIssuesResult, PluginSettings } from "./types"
 
 type CacheEntry<T> = {
   expiresAt: number
@@ -11,16 +11,12 @@ type CacheEntry<T> = {
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 const VIEWER_CACHE_TTL_MS = 10 * 60 * 1000
 const ISSUE_CACHE_TTL_MS = 45 * 1000
-const SEARCH_CACHE_TTL_MS = 30 * 1000
 const NOTIFICATION_CACHE_TTL_MS = 20 * 1000
 
 const clientCache = new Map<string, Octokit>()
 const viewerCache = new Map<string, CacheEntry<GitHubViewer>>()
-const issuesCache = new Map<string, CacheEntry<IssueSection[]>>()
-const issueSearchCache = new Map<string, CacheEntry<GitHubIssue[]>>()
+const issuesCache = new Map<string, CacheEntry<MyIssuesResult>>()
 const notificationCache = new Map<string, CacheEntry<GitHubNotification[]>>()
-const notificationSubjectStateCache = new Map<string, CacheEntry<NotificationSubjectState>>()
-const NOTIFICATION_STATE_BATCH_SIZE = 20
 
 function getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
   const entry = cache.get(key)
@@ -129,7 +125,8 @@ function dedupeIssues(issues: GitHubIssue[]): GitHubIssue[] {
 async function runIssueSearch(settings: PluginSettings, baseQuery: string): Promise<GitHubIssue[]> {
   const client = getClient(settings.personalAccessToken)
   const { sort, order } = getIssueSortApiParams(settings.issueSort)
-  const scopedQueries = settings.repositoryFilterMode === "include" && settings.repositoryList.length > 0 ? settings.repositoryList.map(repository => `${baseQuery} repo:${repository}`) : [baseQuery]
+  const scopedQueries =
+    settings.repositoryFilterMode === "include" && settings.repositoryList.length > 0 ? settings.repositoryList.map(repository => `${baseQuery} repo:${repository}`) : [baseQuery]
 
   const results = await Promise.all(
     scopedQueries.map(query =>
@@ -152,61 +149,6 @@ async function runIssueSearch(settings: PluginSettings, baseQuery: string): Prom
     .slice(0, settings.numberOfResults)
 }
 
-function expandMePlaceholders(input: string, viewerLogin: string): string {
-  return input.replace(/(^|\s)(author|assignee|mentions|involves):@me\b/gi, (_match, prefix, qualifier) => {
-    return `${prefix}${String(qualifier).toLowerCase()}:${viewerLogin}`
-  })
-}
-
-type NotificationSubjectRef = {
-  cacheKey: string
-  number: number
-  owner: string
-  repository: string
-  subjectType: "Issue" | "PullRequest"
-}
-
-function chunkValues<T>(values: T[], size: number): T[][] {
-  const chunks: T[][] = []
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size))
-  }
-
-  return chunks
-}
-
-function getNotificationSubjectCacheKey(token: string, subjectUrl?: string | null): string | null {
-  if (!subjectUrl) {
-    return null
-  }
-
-  return `${token}:${subjectUrl}`
-}
-
-function parseNotificationSubjectRef(settings: PluginSettings, notification: GitHubNotification): NotificationSubjectRef | null {
-  if ((notification.subject.type !== "Issue" && notification.subject.type !== "PullRequest") || !notification.subject.url) {
-    return null
-  }
-
-  const match = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/(issues|pulls)\/(\d+)$/.exec(notification.subject.url)
-  if (!match) {
-    return null
-  }
-
-  const cacheKey = getNotificationSubjectCacheKey(settings.personalAccessToken, notification.subject.url)
-  if (!cacheKey) {
-    return null
-  }
-
-  return {
-    cacheKey,
-    owner: match[1],
-    repository: match[2],
-    number: parseInt(match[4], 10),
-    subjectType: notification.subject.type
-  }
-}
-
 export async function getViewer(settings: PluginSettings): Promise<GitHubViewer> {
   const cacheKey = settings.personalAccessToken
   const cached = getCached(viewerCache, cacheKey)
@@ -219,7 +161,7 @@ export async function getViewer(settings: PluginSettings): Promise<GitHubViewer>
   return setCached(viewerCache, cacheKey, response.data, VIEWER_CACHE_TTL_MS)
 }
 
-export async function getMyIssues(settings: PluginSettings): Promise<IssueSection[]> {
+export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesResult> {
   const cacheKey = JSON.stringify({
     token: settings.personalAccessToken,
     issueSort: settings.issueSort,
@@ -228,7 +170,8 @@ export async function getMyIssues(settings: PluginSettings): Promise<IssueSectio
     showMentioned: settings.showMentioned,
     showRecentlyClosed: settings.showRecentlyClosed,
     repositoryFilterMode: settings.repositoryFilterMode,
-    repositoryList: settings.repositoryList
+    repositoryList: settings.repositoryList,
+    numberOfResults: settings.numberOfResults
   })
   const cached = getCached(issuesCache, cacheKey)
   if (cached) {
@@ -236,30 +179,30 @@ export async function getMyIssues(settings: PluginSettings): Promise<IssueSectio
   }
 
   const viewer = await getViewer(settings)
-  const updatedSince = `updated:>=${formatDate(60)}`
-
   const definitions: Array<{ enabled: boolean; group: string; groupScore: number; query: string; recentlyClosed?: boolean }> = [
     {
       enabled: settings.showCreated,
       group: "Created",
       groupScore: 400,
-      query: `is:issue author:${viewer.login} archived:false is:open ${updatedSince}`
+      query: `is:issue author:${viewer.login} archived:false is:open`
     },
     {
       enabled: settings.showAssigned,
       group: "Assigned",
       groupScore: 300,
-      query: `is:issue assignee:${viewer.login} archived:false is:open ${updatedSince}`
+      query: `is:issue assignee:${viewer.login} archived:false is:open`
     },
     {
       enabled: settings.showMentioned,
       group: "Mentioned",
       groupScore: 200,
-      query: `is:issue mentions:${viewer.login} archived:false is:open ${updatedSince}`
+      query: `is:issue mentions:${viewer.login} archived:false is:open`
     }
   ]
 
   if (settings.showRecentlyClosed) {
+    const updatedSince = `updated:>=${formatDate(60)}`
+
     if (settings.showCreated) {
       definitions.push({
         enabled: true,
@@ -315,117 +258,28 @@ export async function getMyIssues(settings: PluginSettings): Promise<IssueSectio
     sections.push({ group: "Recently Closed", groupScore: 100, issues: recentIssues })
   }
 
-  return setCached(issuesCache, cacheKey, sections, ISSUE_CACHE_TTL_MS)
-}
-
-export async function searchIssues(settings: PluginSettings, searchText: string): Promise<GitHubIssue[]> {
-  const viewer = await getViewer(settings)
-  const cacheKey = JSON.stringify({
-    token: settings.personalAccessToken,
-    searchText,
-    defaultSearchTerms: settings.defaultSearchTerms,
-    issueSort: settings.issueSort,
-    repositoryFilterMode: settings.repositoryFilterMode,
-    repositoryList: settings.repositoryList,
-    numberOfResults: settings.numberOfResults
-  })
-  const cached = getCached(issueSearchCache, cacheKey)
-  if (cached) {
-    return cached
-  }
-
-  const queryParts = ["is:issue", "archived:false"]
-  const defaultTerms = expandMePlaceholders(settings.defaultSearchTerms, viewer.login)
-  if (defaultTerms) {
-    queryParts.push(defaultTerms)
-  }
-  if (searchText) {
-    queryParts.push(expandMePlaceholders(searchText, viewer.login))
-  }
-
-  const issues = await runIssueSearch(settings, queryParts.join(" "))
-  return setCached(issueSearchCache, cacheKey, issues, SEARCH_CACHE_TTL_MS)
+  return setCached(issuesCache, cacheKey, { viewerLogin: viewer.login, sections }, ISSUE_CACHE_TTL_MS)
 }
 
 export async function listNotifications(settings: PluginSettings): Promise<GitHubNotification[]> {
-  const cacheKey = settings.personalAccessToken
+  const cacheKey = JSON.stringify({
+    token: settings.personalAccessToken,
+    numberOfResults: settings.numberOfResults
+  })
   const cached = getCached(notificationCache, cacheKey)
   if (cached) {
     return cached
   }
 
   const client = getClient(settings.personalAccessToken)
-  const notifications = await client.paginate(client.activity.listNotificationsForAuthenticatedUser, {
-    all: true,
-    per_page: 50
-  })
+  const notifications = (
+    await client.activity.listNotificationsForAuthenticatedUser({
+      all: true,
+      per_page: Math.min(Math.max(settings.numberOfResults, 1), 100)
+    })
+  ).data
 
   return setCached(notificationCache, cacheKey, notifications, NOTIFICATION_CACHE_TTL_MS)
-}
-
-export function getNotificationSubjectState(settings: PluginSettings, notification: GitHubNotification): NotificationSubjectState {
-  const cacheKey = getNotificationSubjectCacheKey(settings.personalAccessToken, notification.subject.url)
-  if (!cacheKey) {
-    return null
-  }
-
-  return getCached(notificationSubjectStateCache, cacheKey)
-}
-
-export async function primeNotificationSubjectStates(settings: PluginSettings, notifications: GitHubNotification[]): Promise<void> {
-  const client = getClient(settings.personalAccessToken)
-  const refs = notifications.map(notification => parseNotificationSubjectRef(settings, notification)).filter((ref): ref is NotificationSubjectRef => ref !== null)
-  const uniqueRefs = Array.from(new Map(refs.map(ref => [ref.cacheKey, ref])).values())
-  const uncachedRefs = uniqueRefs.filter(ref => getCached(notificationSubjectStateCache, ref.cacheKey) === null)
-
-  if (uncachedRefs.length === 0) {
-    return
-  }
-
-  await Promise.all(
-    chunkValues(uncachedRefs, NOTIFICATION_STATE_BATCH_SIZE).map(async batch => {
-      const query = [
-        "query NotificationSubjectStates {",
-        ...batch.map((ref, index) => {
-          return `  item${index}: repository(owner: ${JSON.stringify(ref.owner)}, name: ${JSON.stringify(ref.repository)}) { subject: issueOrPullRequest(number: ${String(ref.number)}) { __typename ... on Issue { state } ... on PullRequest { state merged } } }`
-        }),
-        "}"
-      ].join("\n")
-
-      try {
-        const response = await client.request("POST /graphql", { query })
-        const payload = response.data as {
-          data?: Record<string, { subject?: { state?: unknown; merged?: unknown; merged_at?: unknown } | null }>
-        }
-
-        batch.forEach((ref, index) => {
-          const subject = payload.data?.[`item${index}`]?.subject
-          const state = subject ? getNotificationSubjectStateFromApiData(ref.subjectType, subject) : null
-          setCached(notificationSubjectStateCache, ref.cacheKey, state, NOTIFICATION_CACHE_TTL_MS)
-        })
-      } catch {
-        batch.forEach(ref => {
-          setCached(notificationSubjectStateCache, ref.cacheKey, null, NOTIFICATION_CACHE_TTL_MS)
-        })
-      }
-    })
-  )
-}
-
-export function getIssueStateLabel(issue: GitHubIssue): string {
-  if (issue.state === "closed" && issue.state_reason === "not_planned") {
-    return "Closed as not planned"
-  }
-
-  if (issue.state === "closed" && issue.state_reason === "completed") {
-    return "Closed as completed"
-  }
-
-  if (issue.state === "closed") {
-    return "Closed"
-  }
-
-  return "Open"
 }
 
 export function getIssueAssigneeLogins(issue: GitHubIssue): string[] {
@@ -467,12 +321,10 @@ export function matchesNotificationSearch(notification: GitHubNotification, sear
 
 export function invalidateIssueCaches(): void {
   issuesCache.clear()
-  issueSearchCache.clear()
 }
 
 export function invalidateNotificationCaches(): void {
   notificationCache.clear()
-  notificationSubjectStateCache.clear()
 }
 
 export async function assignIssueToViewer(settings: PluginSettings, issue: GitHubIssue): Promise<void> {
