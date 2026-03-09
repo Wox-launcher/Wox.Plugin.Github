@@ -1,14 +1,519 @@
 {
-  "Id": "[Id]",
-  "TriggerKeywords": ["[Trigger Keyword]"],
-  "Name": "[Name]",
-  "Description": "[Description]",
-  "Author": "[Author Name]",
-  "Version": "0.0.1",
+  "Id": "35E4296B-89E2-492E-977B-0120ECCB5C95",
+  "TriggerKeywords": [
+    "gh",
+    "github"
+  ],
+  "Name": "i18n:plugin_name",
+  "Description": "i18n:plugin_description",
+  "Author": "qianlifeng",
+  "Version": "0.1.0",
   "MinWoxVersion": "2.0.0",
   "Runtime": "nodejs",
-  "Website": "[Website]",
+  "Website": "https://github.com/qianlifeng/Wox.Plugin.Github",
   "Entry": "index.js",
-  "Icon": "relative:images/app.png",
-  "SupportedOS": ["windows", "linux", "darwin"]
+  "Icon": "relative:images/app.svg",
+  "SupportedOS": [
+    "windows",
+    "linux",
+    "darwin"
+  ],
+  "Commands": [
+    {
+      "Command": "issues",
+      "Description": "i18n:command_issues_description"
+    },
+    {
+      "Command": "search",
+      "Description": "i18n:command_search_description"
+    },
+    {
+      "Command": "notifications",
+      "Description": "i18n:command_notifications_description"
+    }
+  ],
+  "SettingDefinitions": [
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "personalAccessToken",
+        "Label": "i18n:setting_pat_label",
+        "Tooltip": "i18n:setting_pat_tooltip",
+        "DefaultValue": "",
+        "MaxLines": 1,
+        "Style": {
+          "Width": 520
+        }
+      }
+    },
+    {
+      "Type": "newline"
+    },
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "defaultSearchTerms",
+        "Label": "i18n:setting_default_search_terms_label",
+        "Tooltip": "i18n:setting_default_search_terms_tooltip",
+        "DefaultValue": "author:@me",
+        "MaxLines": 1,
+        "Style": {
+          "Width": 360
+        }
+      }
+    },
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "numberOfResults",
+        "Label": "i18n:setting_number_of_results_label",
+        "Tooltip": "i18n:setting_number_of_results_tooltip",
+        "DefaultValue": "20",
+        "MaxLines": 1,
+        "Validators": [
+          {
+            "Type": "is_number",
+            "Value": {
+              "IsInteger": true,
+              "IsFloat": false
+            }
+          }
+        ],
+        "Style": {
+          "Width": 180
+        }
+      }
+    },
+    {
+      "Type": "select",
+      "Value": {
+        "Key": "issueSort",
+        "Label": "i18n:setting_issue_sort_label",
+        "Tooltip": "i18n:setting_issue_sort_tooltip",
+        "DefaultValue": "updated-desc",
+        "IsMulti": false,
+        "Options": [
+          {
+            "Label": "i18n:sort_updated_desc",
+            "Value": "updated-desc"
+          },
+          {
+            "Label": "i18n:sort_updated_asc",
+            "Value": "updated-asc"
+          },
+          {
+            "Label": "i18n:sort_created_desc",
+            "Value": "created-desc"
+          },
+          {
+            "Label": "i18n:sort_created_asc",
+            "Value": "created-asc"
+          },
+          {
+            "Label": "i18n:sort_comments_desc",
+            "Value": "comments-desc"
+          },
+          {
+            "Label": "i18n:sort_comments_asc",
+            "Value": "comments-asc"
+          }
+        ],
+        "Validators": [],
+        "Style": {
+          "Width": 280
+        }
+      }
+    },
+    {
+      "Type": "newline"
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showCreated",
+        "Label": "i18n:setting_show_created_label",
+        "Tooltip": "i18n:setting_show_created_tooltip",
+        "DefaultValue": "true",
+        "Style": {}
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showAssigned",
+        "Label": "i18n:setting_show_assigned_label",
+        "Tooltip": "i18n:setting_show_assigned_tooltip",
+        "DefaultValue": "true",
+        "Style": {}
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showMentioned",
+        "Label": "i18n:setting_show_mentioned_label",
+        "Tooltip": "i18n:setting_show_mentioned_tooltip",
+        "DefaultValue": "true",
+        "Style": {}
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showRecentlyClosed",
+        "Label": "i18n:setting_show_recently_closed_label",
+        "Tooltip": "i18n:setting_show_recently_closed_tooltip",
+        "DefaultValue": "false",
+        "Style": {}
+      }
+    },
+    {
+      "Type": "newline"
+    },
+    {
+      "Type": "select",
+      "Value": {
+        "Key": "repositoryFilterMode",
+        "Label": "i18n:setting_repository_filter_mode_label",
+        "Tooltip": "i18n:setting_repository_filter_mode_tooltip",
+        "DefaultValue": "all",
+        "IsMulti": false,
+        "Options": [
+          {
+            "Label": "i18n:repository_filter_all",
+            "Value": "all"
+          },
+          {
+            "Label": "i18n:repository_filter_include",
+            "Value": "include"
+          },
+          {
+            "Label": "i18n:repository_filter_exclude",
+            "Value": "exclude"
+          }
+        ],
+        "Validators": [],
+        "Style": {
+          "Width": 320
+        }
+      }
+    },
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "repositoryList",
+        "Label": "i18n:setting_repository_list_label",
+        "Tooltip": "i18n:setting_repository_list_tooltip",
+        "DefaultValue": "",
+        "MaxLines": 4,
+        "Style": {
+          "Width": 520
+        }
+      }
+    }
+  ],
+  "I18n": {
+    "en_US": {
+      "plugin_name": "GitHub",
+      "plugin_description": "Manage GitHub issues and notifications",
+      "command_issues_description": "List your GitHub issues",
+      "command_search_description": "Search GitHub issues",
+      "command_notifications_description": "Manage GitHub notifications",
+      "setting_pat_label": "Personal Access Token",
+      "setting_pat_tooltip": "GitHub classic PAT with scopes repo, notifications, read:org, read:user",
+      "setting_default_search_terms_label": "Default Search Terms",
+      "setting_default_search_terms_tooltip": "Applied to the `search` command before your typed text. Example: author:@me",
+      "setting_number_of_results_label": "Number of Results",
+      "setting_number_of_results_tooltip": "How many issues to fetch per command",
+      "setting_issue_sort_label": "Issue Sort",
+      "setting_issue_sort_tooltip": "Sort order used by `issues` and `search`",
+      "sort_updated_desc": "Recently Updated",
+      "sort_updated_asc": "Least Recently Updated",
+      "sort_created_desc": "Newest",
+      "sort_created_asc": "Oldest",
+      "sort_comments_desc": "Most Commented",
+      "sort_comments_asc": "Least Commented",
+      "setting_show_created_label": "Show Created Issues",
+      "setting_show_created_tooltip": "Include issues created by you in `issues`",
+      "setting_show_assigned_label": "Show Assigned Issues",
+      "setting_show_assigned_tooltip": "Include issues assigned to you in `issues`",
+      "setting_show_mentioned_label": "Show Mentioned Issues",
+      "setting_show_mentioned_tooltip": "Include issues mentioning you in `issues`",
+      "setting_show_recently_closed_label": "Show Recently Closed Issues",
+      "setting_show_recently_closed_tooltip": "Include recently closed issues in `issues`",
+      "setting_repository_filter_mode_label": "Repository Filter Mode",
+      "setting_repository_filter_mode_tooltip": "Apply a repository allow/block list to issues and notifications",
+      "repository_filter_all": "All Repositories",
+      "repository_filter_include": "Include Only Listed Repositories",
+      "repository_filter_exclude": "Exclude Listed Repositories",
+      "setting_repository_list_label": "Repository List",
+      "setting_repository_list_tooltip": "Comma or newline separated repositories, for example owner/repo1, owner/repo2",
+      "setup_token_required_title": "GitHub token required",
+      "setup_token_required_subtitle": "Configure a Personal Access Token with scopes: repo, notifications, read:org, read:user",
+      "setup_preview_line_1": "Create a classic Personal Access Token and put it into the plugin settings.",
+      "setup_preview_line_2": "Required scopes: `%s`",
+      "setup_preview_line_3": "Use the default action to open the token creation page.",
+      "preview_scopes": "Scopes",
+      "preview_setting_key": "Settings Key",
+      "preview_repository": "Repository",
+      "preview_number": "Number",
+      "preview_state": "State",
+      "preview_author": "Author",
+      "preview_assignees": "Assignees",
+      "preview_comments": "Comments",
+      "preview_updated": "Updated",
+      "preview_labels": "Labels",
+      "preview_type": "Type",
+      "preview_reason": "Reason",
+      "preview_unread": "Unread",
+      "preview_target": "Target",
+      "action_open_token_page": "Open Token Creation Page",
+      "action_copy_required_scopes": "Copy Required Scopes",
+      "action_go_to_my_issues": "Go to My Issues",
+      "action_open_my_issues": "Open My Issues",
+      "action_search_issues": "Search Issues",
+      "action_open_notifications": "Open Notifications",
+      "action_open_in_browser": "Open in Browser",
+      "action_copy_issue_url": "Copy Issue URL",
+      "action_copy_issue_title": "Copy Issue Title",
+      "action_assign_to_me": "Assign to Me",
+      "action_unassign_from_me": "Unassign from Me",
+      "action_close_as_completed": "Close as Completed",
+      "action_close_as_not_planned": "Close as Not Planned",
+      "action_reopen_issue": "Reopen Issue",
+      "action_accept_invitation": "Accept Invitation",
+      "action_mark_as_read": "Mark as Read",
+      "action_mark_as_done": "Mark as Done",
+      "action_unsubscribe": "Unsubscribe",
+      "action_copy_target_url": "Copy Target URL",
+      "action_mark_all_as_read": "Mark All as Read",
+      "notify_copied_required_scopes": "Copied required scopes",
+      "notify_copied_issue_url": "Copied issue URL",
+      "notify_copied_issue_title": "Copied issue title",
+      "notify_assigned_to_issue": "Assigned to issue",
+      "notify_unassigned_from_issue": "Unassigned from issue",
+      "notify_closed_issue_completed": "Closed issue #%s as completed",
+      "notify_closed_issue_not_planned": "Closed issue #%s as not planned",
+      "notify_reopened_issue": "Reopened issue #%s",
+      "notify_accepted_invitation": "Accepted invitation to %s",
+      "notify_marked_notification_read": "Marked notification as read",
+      "notify_marked_notification_done": "Marked notification as done",
+      "notify_unsubscribed_notification": "Unsubscribed from notification",
+      "notify_copied_notification_url": "Copied notification URL",
+      "notify_marked_all_notifications_read": "Marked all notifications as read",
+      "home_my_issues_title": "My Issues",
+      "home_my_issues_subtitle": "List issues created by you, assigned to you, or mentioning you",
+      "home_search_issues_title": "Search Issues",
+      "home_search_issues_subtitle": "Run a global issue search using your default search qualifiers",
+      "home_notifications_title": "Notifications",
+      "home_notifications_subtitle": "Manage unread and read GitHub notifications",
+      "group_setup": "Setup",
+      "group_commands": "Commands",
+      "group_actions": "Actions",
+      "group_created": "Created",
+      "group_assigned": "Assigned",
+      "group_mentioned": "Mentioned",
+      "group_recently_closed": "Recently Closed",
+      "group_issues": "Issues",
+      "group_search_results": "Search Results",
+      "group_unread": "Unread",
+      "group_read": "Read",
+      "group_notifications": "Notifications",
+      "group_errors": "Errors",
+      "issue_state_open": "Open",
+      "issue_state_closed": "Closed",
+      "issue_state_closed_completed": "Closed as completed",
+      "issue_state_closed_not_planned": "Closed as not planned",
+      "issue_comments_tail": "%s comments",
+      "issue_none": "None",
+      "issue_unknown_author": "Unknown",
+      "issue_no_description": "No description provided.",
+      "common_yes": "Yes",
+      "common_no": "No",
+      "tail_unread": "Unread",
+      "tail_read": "Read",
+      "empty_issues_title": "No matching issues",
+      "empty_issues_with_search": "No issues matched \"%s\"",
+      "empty_issues_default": "No issues matched the current settings",
+      "empty_search_title": "No search results",
+      "empty_search_with_search": "No issues matched \"%s\" and your default qualifiers",
+      "empty_search_default": "No issues matched the default search qualifiers",
+      "empty_notifications_title": "No notifications found",
+      "empty_notifications_with_search": "No notifications matched \"%s\"",
+      "empty_notifications_default": "No notifications matched the current filters",
+      "mark_all_unread_title": "Mark All Unread Notifications as Read",
+      "mark_all_unread_subtitle": "%s unread notifications",
+      "error_request_failed_title": "GitHub request failed",
+      "notification_type_pull_request": "Pull Request",
+      "notification_type_check_suite": "Check Suite",
+      "notification_type_repository_invitation": "Repository Invitation",
+      "notification_type_repository_vulnerability_alert": "Repository Vulnerability Alert",
+      "notification_type_issue": "Issue",
+      "notification_type_release": "Release",
+      "notification_reason_assign": "Assigned",
+      "notification_reason_author": "Author",
+      "notification_reason_comment": "Commented",
+      "notification_reason_ci_activity": "CI Activity",
+      "notification_reason_invitation": "Invited",
+      "notification_reason_manual": "Subscribed",
+      "notification_reason_mention": "Mentioned",
+      "notification_reason_review_requested": "Review Requested",
+      "notification_reason_security_alert": "Security Alert",
+      "notification_reason_state_change": "Changed",
+      "notification_reason_subscribed": "Watching",
+      "notification_reason_team_mention": "Team Mentioned",
+      "notification_reason_unknown": "Unknown"
+    },
+    "zh_CN": {
+      "plugin_name": "GitHub",
+      "plugin_description": "管理 GitHub 的 issues 和通知",
+      "command_issues_description": "查看你的 GitHub issues",
+      "command_search_description": "搜索 GitHub issues",
+      "command_notifications_description": "管理 GitHub 通知",
+      "setting_pat_label": "Personal Access Token",
+      "setting_pat_tooltip": "GitHub classic PAT，至少包含 repo、notifications、read:org、read:user 权限",
+      "setting_default_search_terms_label": "默认搜索词",
+      "setting_default_search_terms_tooltip": "会先附加到 `search` 命令，再拼接你输入的搜索词，例如 author:@me",
+      "setting_number_of_results_label": "结果数量",
+      "setting_number_of_results_tooltip": "每次命令最多拉取多少条 issue",
+      "setting_issue_sort_label": "Issue 排序",
+      "setting_issue_sort_tooltip": "`issues` 和 `search` 命令使用的排序方式",
+      "sort_updated_desc": "最近更新优先",
+      "sort_updated_asc": "最久未更新优先",
+      "sort_created_desc": "最新创建优先",
+      "sort_created_asc": "最早创建优先",
+      "sort_comments_desc": "评论最多优先",
+      "sort_comments_asc": "评论最少优先",
+      "setting_show_created_label": "显示我创建的 Issues",
+      "setting_show_created_tooltip": "在 `issues` 中包含你创建的 issues",
+      "setting_show_assigned_label": "显示分配给我的 Issues",
+      "setting_show_assigned_tooltip": "在 `issues` 中包含分配给你的 issues",
+      "setting_show_mentioned_label": "显示提到我的 Issues",
+      "setting_show_mentioned_tooltip": "在 `issues` 中包含提到你的 issues",
+      "setting_show_recently_closed_label": "显示最近关闭的 Issues",
+      "setting_show_recently_closed_tooltip": "在 `issues` 中包含最近关闭的 issues",
+      "setting_repository_filter_mode_label": "仓库过滤模式",
+      "setting_repository_filter_mode_tooltip": "对 issues 和 notifications 应用仓库白名单或黑名单",
+      "repository_filter_all": "所有仓库",
+      "repository_filter_include": "仅包含列表中的仓库",
+      "repository_filter_exclude": "排除列表中的仓库",
+      "setting_repository_list_label": "仓库列表",
+      "setting_repository_list_tooltip": "用逗号或换行分隔仓库，例如 owner/repo1, owner/repo2",
+      "setup_token_required_title": "需要 GitHub Token",
+      "setup_token_required_subtitle": "请配置 Personal Access Token，并至少授予 repo、notifications、read:org、read:user 权限",
+      "setup_preview_line_1": "创建一个 classic Personal Access Token，并填入插件设置中。",
+      "setup_preview_line_2": "所需权限：`%s`",
+      "setup_preview_line_3": "使用默认动作可直接打开 GitHub 的 token 创建页面。",
+      "preview_scopes": "权限范围",
+      "preview_setting_key": "设置键",
+      "preview_repository": "仓库",
+      "preview_number": "编号",
+      "preview_state": "状态",
+      "preview_author": "作者",
+      "preview_assignees": "指派人",
+      "preview_comments": "评论数",
+      "preview_updated": "更新时间",
+      "preview_labels": "标签",
+      "preview_type": "类型",
+      "preview_reason": "原因",
+      "preview_unread": "未读",
+      "preview_target": "目标地址",
+      "action_open_token_page": "打开 Token 创建页面",
+      "action_copy_required_scopes": "复制所需权限",
+      "action_go_to_my_issues": "进入我的 Issues",
+      "action_open_my_issues": "打开我的 Issues",
+      "action_search_issues": "搜索 Issues",
+      "action_open_notifications": "打开通知",
+      "action_open_in_browser": "在浏览器中打开",
+      "action_copy_issue_url": "复制 Issue URL",
+      "action_copy_issue_title": "复制 Issue 标题",
+      "action_assign_to_me": "分配给我",
+      "action_unassign_from_me": "取消分配给我",
+      "action_close_as_completed": "以已完成关闭",
+      "action_close_as_not_planned": "以不计划处理关闭",
+      "action_reopen_issue": "重新打开 Issue",
+      "action_accept_invitation": "接受邀请",
+      "action_mark_as_read": "标记为已读",
+      "action_mark_as_done": "标记为完成",
+      "action_unsubscribe": "取消订阅",
+      "action_copy_target_url": "复制目标 URL",
+      "action_mark_all_as_read": "全部标记为已读",
+      "notify_copied_required_scopes": "已复制所需权限",
+      "notify_copied_issue_url": "已复制 Issue URL",
+      "notify_copied_issue_title": "已复制 Issue 标题",
+      "notify_assigned_to_issue": "已分配到该 Issue",
+      "notify_unassigned_from_issue": "已取消分配该 Issue",
+      "notify_closed_issue_completed": "已将 Issue #%s 标记为已完成并关闭",
+      "notify_closed_issue_not_planned": "已将 Issue #%s 标记为不计划处理并关闭",
+      "notify_reopened_issue": "已重新打开 Issue #%s",
+      "notify_accepted_invitation": "已接受 %s 的邀请",
+      "notify_marked_notification_read": "已将通知标记为已读",
+      "notify_marked_notification_done": "已将通知标记为完成",
+      "notify_unsubscribed_notification": "已取消订阅该通知",
+      "notify_copied_notification_url": "已复制通知 URL",
+      "notify_marked_all_notifications_read": "已将所有通知标记为已读",
+      "home_my_issues_title": "我的 Issues",
+      "home_my_issues_subtitle": "查看你创建、分配给你或提到你的 issues",
+      "home_search_issues_title": "搜索 Issues",
+      "home_search_issues_subtitle": "使用默认搜索限定词进行全局 issue 搜索",
+      "home_notifications_title": "通知",
+      "home_notifications_subtitle": "管理未读和已读的 GitHub 通知",
+      "group_setup": "配置",
+      "group_commands": "命令",
+      "group_actions": "操作",
+      "group_created": "我创建的",
+      "group_assigned": "分配给我的",
+      "group_mentioned": "提到我的",
+      "group_recently_closed": "最近关闭",
+      "group_issues": "Issues",
+      "group_search_results": "搜索结果",
+      "group_unread": "未读",
+      "group_read": "已读",
+      "group_notifications": "通知",
+      "group_errors": "错误",
+      "issue_state_open": "开启中",
+      "issue_state_closed": "已关闭",
+      "issue_state_closed_completed": "已完成并关闭",
+      "issue_state_closed_not_planned": "不计划处理并关闭",
+      "issue_comments_tail": "%s 条评论",
+      "issue_none": "无",
+      "issue_unknown_author": "未知",
+      "issue_no_description": "没有描述。",
+      "common_yes": "是",
+      "common_no": "否",
+      "tail_unread": "未读",
+      "tail_read": "已读",
+      "empty_issues_title": "没有匹配的 Issues",
+      "empty_issues_with_search": "没有匹配“%s”的 issues",
+      "empty_issues_default": "当前设置下没有匹配的 issues",
+      "empty_search_title": "没有搜索结果",
+      "empty_search_with_search": "没有 issue 匹配“%s”以及当前默认搜索限定词",
+      "empty_search_default": "没有 issue 匹配当前默认搜索限定词",
+      "empty_notifications_title": "没有找到通知",
+      "empty_notifications_with_search": "没有通知匹配“%s”",
+      "empty_notifications_default": "当前过滤条件下没有通知",
+      "mark_all_unread_title": "将所有未读通知标记为已读",
+      "mark_all_unread_subtitle": "%s 条未读通知",
+      "error_request_failed_title": "GitHub 请求失败",
+      "notification_type_pull_request": "Pull Request",
+      "notification_type_check_suite": "检查任务",
+      "notification_type_repository_invitation": "仓库邀请",
+      "notification_type_repository_vulnerability_alert": "仓库漏洞告警",
+      "notification_type_issue": "Issue",
+      "notification_type_release": "发布",
+      "notification_reason_assign": "已分配给你",
+      "notification_reason_author": "你是作者",
+      "notification_reason_comment": "有人评论",
+      "notification_reason_ci_activity": "CI 活动",
+      "notification_reason_invitation": "邀请",
+      "notification_reason_manual": "手动订阅",
+      "notification_reason_mention": "提到了你",
+      "notification_reason_review_requested": "请求你评审",
+      "notification_reason_security_alert": "安全告警",
+      "notification_reason_state_change": "状态变化",
+      "notification_reason_subscribed": "正在关注",
+      "notification_reason_team_mention": "提到了你的团队",
+      "notification_reason_unknown": "未知"
+    }
+  }
 }
