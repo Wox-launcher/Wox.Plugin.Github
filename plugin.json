@@ -1,9 +1,6 @@
 {
   "Id": "35E4296B-89E2-492E-977B-0120ECCB5C95",
-  "TriggerKeywords": [
-    "gh",
-    "github"
-  ],
+  "TriggerKeywords": ["gh", "github"],
   "Name": "i18n:plugin_name",
   "Description": "i18n:plugin_description",
   "Author": "qianlifeng",
@@ -13,11 +10,7 @@
   "Website": "https://github.com/qianlifeng/Wox.Plugin.Github",
   "Entry": "index.js",
   "Icon": "relative:images/app.svg",
-  "SupportedOS": [
-    "windows",
-    "linux",
-    "darwin"
-  ],
+  "SupportedOS": ["windows", "linux", "darwin"],
   "Commands": [
     {
       "Command": "issues",
@@ -28,6 +21,15 @@
       "Description": "i18n:command_notifications_description"
     }
   ],
+  "QueryRequirements": {
+    "AnyQuery": [
+      {
+        "SettingKey": "personalAccessToken",
+        "Validators": [{ "Type": "not_empty" }],
+        "Message": "i18n:setup_token_required_title"
+      }
+    ]
+  },
   "SettingDefinitions": [
     {
       "Type": "textbox",
@@ -202,7 +204,7 @@
       "command_issues_description": "List your GitHub issues",
       "command_notifications_description": "Manage GitHub notifications",
       "setting_pat_label": "Personal Access Token",
-      "setting_pat_tooltip": "GitHub classic PAT with scopes repo, notifications, read:org, read:user",
+      "setting_pat_tooltip": "GitHub classic PAT with scopes `repo`, `notifications`, `read:org`, `read:user`. [Click here to create one](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org,read:user&description=Wox.Plugin.Github)",
       "setting_number_of_results_label": "Number of Results",
       "setting_number_of_results_tooltip": "How many issues or notifications to fetch per command",
       "setting_issue_sort_label": "Issue Sort",
@@ -343,7 +345,7 @@
       "command_issues_description": "查看你的 GitHub issues",
       "command_notifications_description": "管理 GitHub 通知",
       "setting_pat_label": "Personal Access Token",
-      "setting_pat_tooltip": "GitHub classic PAT，至少包含 repo、notifications、read:org、read:user 权限",
+      "setting_pat_tooltip": "GitHub classic PAT，至少包含 `repo`、`notifications`、`read:org`、`read:user` 权限。[点击这里创建 Token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org,read:user&description=Wox.Plugin.Github)",
       "setting_number_of_results_label": "结果数量",
       "setting_number_of_results_tooltip": "每次命令最多拉取多少条 issue 或通知",
       "setting_issue_sort_label": "Issue 排序",

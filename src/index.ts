@@ -11,6 +11,7 @@ import {
   getIssueAssigneeLogins,
   getIssueRepositoryFullName,
   getMyIssues,
+  getSubjectState,
   invalidateIssueCaches,
   invalidateNotificationCaches,
   listNotifications,
@@ -36,10 +37,12 @@ import {
   IconActionSkip,
   IconActionUnassign,
   IconActionUnsubscribe,
-  IconIssue,
   IconIssueClosed,
   IconIssueOpen,
   IconNotificationInbox,
+  IconNotificationInboxColored,
+  IconPullRequestClosed,
+  IconPullRequestMerged,
   IconPullRequestOpen,
   IconRepositoryTag
 } from "./icons"
@@ -85,11 +88,13 @@ function issueIcon(issue: GitHubIssue): WoxImage {
   return IconIssueOpen
 }
 
-function notificationIcon(notification: GitHubNotification): WoxImage {
+function notificationIcon(notification: GitHubNotification, state: string | null): WoxImage {
   switch (notification.subject.type) {
     case "Issue":
-      return IconIssueOpen
+      return state === "closed" ? IconIssueClosed : IconIssueOpen
     case "PullRequest":
+      if (state === "merged") return IconPullRequestMerged
+      if (state === "closed") return IconPullRequestClosed
       return IconPullRequestOpen
     case "RepositoryInvitation":
       return IconNotificationInbox
@@ -108,7 +113,7 @@ function formatDate(dateString: string): string {
 
 function buildCommandQuery(query: Query, command: string): string {
   const trigger = (query.TriggerKeyword || "gh").trim()
-  return `${trigger} ${command} `.trimEnd()
+  return `${trigger} ${command} `
 }
 
 function getIssueStateTranslationKey(issue: GitHubIssue): string {
@@ -320,14 +325,14 @@ async function buildHomeResults(ctx: Context, query: Query, parsed: ParsedPlugin
       Id: makeResultId(),
       Title: await t(ctx, "home_my_issues_title"),
       SubTitle: await t(ctx, "home_my_issues_subtitle"),
-      Icon: IconIssue,
+      Icon: IconIssueOpen,
       Actions: [changeQueryAction(buildCommandQuery(query, "issues"), await t(ctx, "action_open_my_issues"), IconIssueOpen, true)]
     },
     {
       Id: makeResultId(),
       Title: await t(ctx, "home_notifications_title"),
       SubTitle: await t(ctx, "home_notifications_subtitle"),
-      Icon: IconNotificationInbox,
+      Icon: IconNotificationInboxColored,
       Actions: [changeQueryAction(buildCommandQuery(query, "notifications"), await t(ctx, "action_open_notifications"), IconNotificationInbox, true)]
     }
   ]
@@ -605,7 +610,7 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
     Id: makeResultId(),
     Title: notification.subject.title,
     SubTitle: await getNotificationSubtitleText(ctx, notification),
-    Icon: notificationIcon(notification),
+    Icon: notificationIcon(notification, getSubjectState(notification.subject.url)),
     Group: await t(ctx, notification.unread ? "group_unread" : "group_read"),
     GroupScore: notification.unread ? 200 : 100,
     Score: toScore(notification.updated_at),

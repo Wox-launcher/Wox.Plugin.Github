@@ -17,6 +17,42 @@ const clientCache = new Map<string, Octokit>()
 const viewerCache = new Map<string, CacheEntry<GitHubViewer>>()
 const issuesCache = new Map<string, CacheEntry<MyIssuesResult>>()
 const notificationCache = new Map<string, CacheEntry<GitHubNotification[]>>()
+const subjectStateCache = new Map<string, CacheEntry<string>>()
+
+/**
+ * Compute how long to cache a subject's state based on how old the notification is
+ * and whether the fetched state is terminal (closed/merged).
+ *
+ * Age tiers (base TTL):
+ *   < 1 h   →  1 min   (very fresh, state may still change)
+ *   < 1 d   →  5 min
+ *   < 7 d   → 15 min
+ *   < 30 d  → 60 min
+ *   ≥ 30 d  →  6 h
+ *
+ * Terminal states (closed / merged) get 10× the base TTL because they rarely reopen.
+ */
+function subjectStateTtl(updatedAt: string, state: string): number {
+  const ageMs = Date.now() - new Date(updatedAt).getTime()
+  const HOUR = 60 * 60 * 1000
+  const DAY_MS = 24 * HOUR
+
+  let baseTtl: number
+  if (ageMs < HOUR) {
+    baseTtl = 1 * 60 * 1000
+  } else if (ageMs < DAY_MS) {
+    baseTtl = 5 * 60 * 1000
+  } else if (ageMs < 7 * DAY_MS) {
+    baseTtl = 15 * 60 * 1000
+  } else if (ageMs < 30 * DAY_MS) {
+    baseTtl = 60 * 60 * 1000
+  } else {
+    baseTtl = 6 * 60 * 60 * 1000
+  }
+
+  const isTerminal = state === "closed" || state === "merged"
+  return isTerminal ? baseTtl * 10 : baseTtl
+}
 
 function getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
   const entry = cache.get(key)
@@ -125,8 +161,7 @@ function dedupeIssues(issues: GitHubIssue[]): GitHubIssue[] {
 async function runIssueSearch(settings: PluginSettings, baseQuery: string): Promise<GitHubIssue[]> {
   const client = getClient(settings.personalAccessToken)
   const { sort, order } = getIssueSortApiParams(settings.issueSort)
-  const scopedQueries =
-    settings.repositoryFilterMode === "include" && settings.repositoryList.length > 0 ? settings.repositoryList.map(repository => `${baseQuery} repo:${repository}`) : [baseQuery]
+  const scopedQueries = settings.repositoryFilterMode === "include" && settings.repositoryList.length > 0 ? settings.repositoryList.map(repository => `${baseQuery} repo:${repository}`) : [baseQuery]
 
   const results = await Promise.all(
     scopedQueries.map(query =>
@@ -261,6 +296,32 @@ export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesRes
   return setCached(issuesCache, cacheKey, { viewerLogin: viewer.login, sections }, ISSUE_CACHE_TTL_MS)
 }
 
+async function fetchSubjectState(url: string, token: string, updatedAt: string): Promise<void> {
+  if (getCached(subjectStateCache, url) !== null) return
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "Wox.Plugin.Github"
+      }
+    })
+    if (!response.ok) return
+    const data = (await response.json()) as { state?: string; merged?: boolean }
+    const state = data.merged ? "merged" : data.state ?? null
+    if (state) {
+      setCached(subjectStateCache, url, state, subjectStateTtl(updatedAt, state))
+    }
+  } catch {
+    // ignore errors for individual subject state fetches
+  }
+}
+
+export function getSubjectState(url: string | null | undefined): string | null {
+  if (!url) return null
+  return getCached(subjectStateCache, url)
+}
+
 export async function listNotifications(settings: PluginSettings): Promise<GitHubNotification[]> {
   const cacheKey = JSON.stringify({
     token: settings.personalAccessToken,
@@ -278,6 +339,12 @@ export async function listNotifications(settings: PluginSettings): Promise<GitHu
       per_page: Math.min(Math.max(settings.numberOfResults, 1), 100)
     })
   ).data
+
+  // Fetch issue/PR states in parallel to populate the subject state cache.
+  // Each fetch is skipped if a valid cache entry already exists, so re-runs
+  // only hit the network for entries whose TTL has expired.
+  const subjectItems = notifications.filter(n => (n.subject.type === "Issue" || n.subject.type === "PullRequest") && n.subject.url)
+  void Promise.allSettled(subjectItems.map(n => fetchSubjectState(n.subject.url, settings.personalAccessToken, n.updated_at)))
 
   return setCached(notificationCache, cacheKey, notifications, NOTIFICATION_CACHE_TTL_MS)
 }
@@ -325,6 +392,7 @@ export function invalidateIssueCaches(): void {
 
 export function invalidateNotificationCaches(): void {
   notificationCache.clear()
+  subjectStateCache.clear()
 }
 
 export async function assignIssueToViewer(settings: PluginSettings, issue: GitHubIssue): Promise<void> {
