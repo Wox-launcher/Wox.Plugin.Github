@@ -33,6 +33,6 @@
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",
-    "@wox-launcher/wox-plugin": "^0.0.131"
+    "@wox-launcher/wox-plugin": "^0.0.132"
   }
 }

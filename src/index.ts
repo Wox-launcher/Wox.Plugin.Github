@@ -1,4 +1,4 @@
-import { Context, Plugin, PluginInitParams, PublicAPI, Query, Result, ResultAction, WoxImage } from "@wox-launcher/wox-plugin"
+import { Context, Plugin, PluginInitParams, PublicAPI, Query, QueryRefinement, QueryResponse, Result, ResultAction, WoxImage } from "@wox-launcher/wox-plugin"
 import { spawn } from "child_process"
 import { randomUUID } from "crypto"
 import os from "os"
@@ -8,10 +8,12 @@ import {
   acceptRepositoryInvitation,
   assignIssueToViewer,
   closeIssue,
+  compareIssues,
   getIssueAssigneeLogins,
   getIssueRepositoryFullName,
   getMyIssues,
   getSubjectState,
+  initGithub,
   invalidateIssueCaches,
   invalidateNotificationCaches,
   listNotifications,
@@ -48,7 +50,7 @@ import {
 } from "./icons"
 import { parsePluginQuery } from "./query"
 import { getSettings } from "./settings"
-import { GitHubIssue, GitHubNotification, ParsedPluginQuery, PluginSettings } from "./types"
+import { GitHubIssue, GitHubNotification, IssueSort, ParsedPluginQuery, PluginSettings } from "./types"
 
 let api: PublicAPI
 
@@ -629,61 +631,190 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
   }
 }
 
-async function queryIssues(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<Result[]> {
+const REFINEMENT_REPO_ID = "notification_repo"
+const REFINEMENT_UNREAD_ID = "notification_unread"
+const REFINEMENT_TYPE_ID = "notification_type"
+const REFINEMENT_ISSUE_STATE_ID = "issue_state"
+const REFINEMENT_ISSUE_SORT_ID = "issue_sort"
+
+async function queryIssues(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<QueryResponse> {
   const issueData = await getMyIssues(settings)
-  const resultPromises = issueData.sections.flatMap(section =>
+
+  // Read refinement selections
+  const selectedState = query.Refinements?.[REFINEMENT_ISSUE_STATE_ID] ?? "open"
+  const selectedSort = (query.Refinements?.[REFINEMENT_ISSUE_SORT_ID] ?? settings.issueSort) as IssueSort
+
+  // Filter sections by state
+  let sections = issueData.sections
+  if (selectedState === "open") {
+    sections = sections.filter(s => s.group !== "Recently Closed")
+  } else if (selectedState === "closed") {
+    sections = sections.filter(s => s.group === "Recently Closed")
+  }
+
+  // Re-sort in memory if refinement differs from cached sort
+  if (selectedSort !== settings.issueSort) {
+    sections = sections.map(s => ({ ...s, issues: [...s.issues].sort((a, b) => compareIssues(a, b, selectedSort)) }))
+  }
+
+  const refinements: QueryRefinement[] = [
+    {
+      Id: REFINEMENT_ISSUE_STATE_ID,
+      Title: await t(ctx, "refinement_state_label"),
+      Type: "singleSelect",
+      DefaultValue: ["open"],
+      Hotkey: "alt+s",
+      Options: [
+        { Value: "open", Title: await t(ctx, "refinement_state_open") },
+        { Value: "closed", Title: await t(ctx, "refinement_state_closed") },
+        { Value: "all", Title: await t(ctx, "refinement_state_all") }
+      ]
+    },
+    {
+      Id: REFINEMENT_ISSUE_SORT_ID,
+      Title: await t(ctx, "refinement_sort_label"),
+      Type: "sort",
+      DefaultValue: [settings.issueSort],
+      Hotkey: "alt+o",
+      Options: [
+        { Value: "updated-desc", Title: await t(ctx, "sort_updated_desc") },
+        { Value: "updated-asc", Title: await t(ctx, "sort_updated_asc") },
+        { Value: "created-desc", Title: await t(ctx, "sort_created_desc") },
+        { Value: "created-asc", Title: await t(ctx, "sort_created_asc") },
+        { Value: "comments-desc", Title: await t(ctx, "sort_comments_desc") },
+        { Value: "comments-asc", Title: await t(ctx, "sort_comments_asc") }
+      ]
+    }
+  ]
+
+  const resultPromises = sections.flatMap(section =>
     section.issues.filter(issue => matchesIssueSearch(issue, parsed.search)).map(issue => buildIssueResult(ctx, query, settings, issueData.viewerLogin, issue, section.group, section.groupScore))
   )
   const results = await Promise.all(resultPromises)
 
-  if (results.length > 0) {
-    return results
+  return {
+    Results:
+      results.length > 0
+        ? results
+        : [
+            emptyStateResult(
+              await t(ctx, "empty_issues_title"),
+              parsed.search ? await tf(ctx, "empty_issues_with_search", parsed.search) : await t(ctx, "empty_issues_default"),
+              await t(ctx, "group_issues"),
+              100
+            )
+          ],
+    Refinements: refinements
   }
-
-  return [
-    emptyStateResult(
-      await t(ctx, "empty_issues_title"),
-      parsed.search ? await tf(ctx, "empty_issues_with_search", parsed.search) : await t(ctx, "empty_issues_default"),
-      await t(ctx, "group_issues"),
-      100
-    )
-  ]
 }
 
-async function queryNotifications(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<Result[]> {
-  const notifications = (await listNotifications(settings))
-    .filter(notification => !parsed.unreadOnly || notification.unread)
-    .filter(notification => matchesNotificationSearch(notification, parsed.search))
-    .filter(notification => {
-      if (settings.repositoryFilterMode === "all" || settings.repositoryList.length === 0) {
-        return true
-      }
-
-      const repository = notification.repository.full_name.toLowerCase()
-      const listed = settings.repositoryList.includes(repository)
+async function queryNotifications(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<QueryResponse> {
+  // Apply settings-level filters (text search + repo allowlist/blocklist)
+  const baseNotifications = (await listNotifications(settings))
+    .filter(n => matchesNotificationSearch(n, parsed.search))
+    .filter(n => {
+      if (settings.repositoryFilterMode === "all" || settings.repositoryList.length === 0) return true
+      const repo = n.repository.full_name.toLowerCase()
+      const listed = settings.repositoryList.includes(repo)
       return settings.repositoryFilterMode === "include" ? listed : !listed
     })
 
-  const unreadCount = notifications.filter(notification => notification.unread).length
-  const results = await Promise.all(notifications.map(notification => buildNotificationResult(ctx, query, settings, notification, unreadCount > 1)))
+  // Read refinement selections
+  const showUnreadOnly = parsed.unreadOnly || query.Refinements?.[REFINEMENT_UNREAD_ID] === "unread"
+  const selectedTypes = new Set(
+    (query.Refinements?.[REFINEMENT_TYPE_ID] ?? "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
+  )
+  const selectedRepos = new Set(
+    (query.Refinements?.[REFINEMENT_REPO_ID] ?? "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
+  )
 
-  if (results.length > 0) {
-    return results
+  // Apply refinement filters
+  const filteredNotifications = baseNotifications
+    .filter(n => !showUnreadOnly || n.unread)
+    .filter(n => selectedTypes.size === 0 || selectedTypes.has(n.subject.type))
+    .filter(n => selectedRepos.size === 0 || selectedRepos.has(n.repository.full_name))
+
+  // Build refinements (counts from baseNotifications, before refinement filtering)
+  const refinements: QueryRefinement[] = []
+
+  // Unread toggle (always shown)
+  refinements.push({
+    Id: REFINEMENT_UNREAD_ID,
+    Title: await t(ctx, "refinement_unread_label"),
+    Type: "toggle",
+    Hotkey: "alt+u",
+    Options: [{ Value: "unread", Title: await t(ctx, "refinement_unread_only") }]
+  })
+
+  // Type filter (only when multiple types present)
+  const typeCounts = new Map<string, number>()
+  for (const n of baseNotifications) {
+    typeCounts.set(n.subject.type, (typeCounts.get(n.subject.type) ?? 0) + 1)
+  }
+  if (typeCounts.size > 1) {
+    refinements.push({
+      Id: REFINEMENT_TYPE_ID,
+      Title: await t(ctx, "refinement_type_label"),
+      Type: "multiSelect",
+      Hotkey: "alt+t",
+      Options: await Promise.all(
+        Array.from(typeCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(async ([type, count]) => {
+            const key = getNotificationTypeTranslationKey({ id: "", reason: "", subject: { type, title: "" }, repository: { full_name: "", html_url: "" } })
+            const title = key === "notification_type_default" ? type : await t(ctx, key)
+            return { Value: type, Title: title, Count: count }
+          })
+      )
+    })
   }
 
-  return [
-    emptyStateResult(
-      await t(ctx, "empty_notifications_title"),
-      parsed.search ? await tf(ctx, "empty_notifications_with_search", parsed.search) : await t(ctx, "empty_notifications_default"),
-      await t(ctx, "group_notifications"),
-      100
-    )
-  ]
+  // Repo filter (only when multiple repos present)
+  const repoCounts = new Map<string, number>()
+  for (const n of baseNotifications) {
+    repoCounts.set(n.repository.full_name, (repoCounts.get(n.repository.full_name) ?? 0) + 1)
+  }
+  if (repoCounts.size > 1) {
+    refinements.push({
+      Id: REFINEMENT_REPO_ID,
+      Title: await t(ctx, "refinement_repo_label"),
+      Type: "multiSelect",
+      Hotkey: "alt+r",
+      Options: Array.from(repoCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([repo, count]) => ({ Value: repo, Title: repo, Count: count }))
+    })
+  }
+
+  const unreadCount = filteredNotifications.filter(n => n.unread).length
+  const results = await Promise.all(filteredNotifications.map(n => buildNotificationResult(ctx, query, settings, n, unreadCount > 1)))
+
+  return {
+    Results:
+      results.length > 0
+        ? results
+        : [
+            emptyStateResult(
+              await t(ctx, "empty_notifications_title"),
+              parsed.search ? await tf(ctx, "empty_notifications_with_search", parsed.search) : await t(ctx, "empty_notifications_default"),
+              await t(ctx, "group_notifications"),
+              100
+            )
+          ],
+    Refinements: refinements
+  }
 }
 
 export const plugin: Plugin = {
   init: async (ctx: Context, initParams: PluginInitParams) => {
     api = initParams.API
+    await initGithub(ctx, api)
     await api.OnSettingChanged(ctx, async (_settingCtx, key) => {
       if (
         key === "personalAccessToken" ||
@@ -704,14 +835,14 @@ export const plugin: Plugin = {
     await api.Log(ctx, "Info", "GitHub plugin initialized")
   },
 
-  query: async (ctx: Context, query: Query): Promise<Result[]> => {
+  query: async (ctx: Context, query: Query): Promise<QueryResponse> => {
     try {
       const settings = await getSettings(ctx, api)
       const parsed = parsePluginQuery(query.Command, query.Search)
       const configured = settings.personalAccessToken.length > 0
 
       if (!configured) {
-        return [...(await setupResults(ctx, query)), ...(await buildHomeResults(ctx, query, parsed))]
+        return { Results: [...(await setupResults(ctx, query)), ...(await buildHomeResults(ctx, query, parsed))] }
       }
 
       switch (parsed.mode) {
@@ -721,20 +852,22 @@ export const plugin: Plugin = {
           return await queryNotifications(ctx, query, settings, parsed)
         case "home":
         default:
-          return await buildHomeResults(ctx, query, parsed)
+          return { Results: await buildHomeResults(ctx, query, parsed) }
       }
     } catch (error) {
       await api.Log(ctx, "Error", getErrorMessage(error))
-      return [
-        {
-          Id: makeResultId(),
-          Title: await t(ctx, "error_request_failed_title"),
-          SubTitle: getErrorMessage(error),
-          Icon: ICON,
-          Group: await t(ctx, "group_errors"),
-          GroupScore: 500
-        }
-      ]
+      return {
+        Results: [
+          {
+            Id: makeResultId(),
+            Title: await t(ctx, "error_request_failed_title"),
+            SubTitle: getErrorMessage(error),
+            Icon: ICON,
+            Group: await t(ctx, "group_errors"),
+            GroupScore: 500
+          }
+        ]
+      }
     }
   }
 }

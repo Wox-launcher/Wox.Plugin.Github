@@ -33,11 +33,14 @@ export function parsePluginQuery(command: string | undefined, search: string): P
 
   if (normalizedSearch.length > 0) {
     const firstSpace = normalizedSearch.indexOf(" ")
+    // Only enter command mode when the user has typed a space after the token
+    // (trailing space is lost by normalizeSearch's trim, so check raw search)
+    const hasSpaceAfterToken = search.trimStart().includes(" ")
     const firstToken = (firstSpace === -1 ? normalizedSearch : normalizedSearch.slice(0, firstSpace)).toLowerCase()
     const rest = firstSpace === -1 ? "" : normalizeSearch(normalizedSearch.slice(firstSpace + 1))
     const mode = COMMAND_ALIASES[firstToken]
 
-    if (mode === "notifications") {
+    if (mode && (firstSpace !== -1 || hasSpaceAfterToken)) {
       if (rest.toLowerCase().startsWith("unread ")) {
         return { mode, search: normalizeSearch(rest.slice(7)), unreadOnly: true }
       }
@@ -46,10 +49,6 @@ export function parsePluginQuery(command: string | undefined, search: string): P
         return { mode, search: "", unreadOnly: true }
       }
 
-      return { mode, search: rest, unreadOnly: false }
-    }
-
-    if (mode) {
       return { mode, search: rest, unreadOnly: false }
     }
   }

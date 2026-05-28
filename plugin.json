@@ -5,7 +5,7 @@
   "Description": "i18n:plugin_description",
   "Author": "qianlifeng",
   "Version": "0.1.0",
-  "MinWoxVersion": "2.0.0",
+  "MinWoxVersion": "2.1.1",
   "Runtime": "nodejs",
   "Website": "https://github.com/qianlifeng/Wox.Plugin.Github",
   "Entry": "index.js",
@@ -337,7 +337,16 @@
       "notification_reason_state_change": "Changed",
       "notification_reason_subscribed": "Watching",
       "notification_reason_team_mention": "Team Mentioned",
-      "notification_reason_unknown": "Unknown"
+      "notification_reason_unknown": "Unknown",
+      "refinement_repo_label": "Repository",
+      "refinement_unread_label": "Unread",
+      "refinement_unread_only": "Unread only",
+      "refinement_type_label": "Type",
+      "refinement_state_label": "State",
+      "refinement_state_open": "Open",
+      "refinement_state_closed": "Closed",
+      "refinement_state_all": "All",
+      "refinement_sort_label": "Sort"
     },
     "zh_CN": {
       "plugin_name": "GitHub",
@@ -478,7 +487,16 @@
       "notification_reason_state_change": "状态变化",
       "notification_reason_subscribed": "正在关注",
       "notification_reason_team_mention": "提到了你的团队",
-      "notification_reason_unknown": "未知"
+      "notification_reason_unknown": "未知",
+      "refinement_repo_label": "仓库",
+      "refinement_unread_label": "未读",
+      "refinement_unread_only": "仅未读",
+      "refinement_type_label": "类型",
+      "refinement_state_label": "状态",
+      "refinement_state_open": "开启",
+      "refinement_state_closed": "已关闭",
+      "refinement_state_all": "全部",
+      "refinement_sort_label": "排序"
     }
   }
 }

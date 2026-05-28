@@ -1,3 +1,4 @@
+import { Context, PublicAPI } from "@wox-launcher/wox-plugin"
 import { Octokit } from "@octokit/rest"
 
 import { getNotificationReasonLabel, getNotificationTypeTitle } from "./github-format"
@@ -18,6 +19,45 @@ const viewerCache = new Map<string, CacheEntry<GitHubViewer>>()
 const issuesCache = new Map<string, CacheEntry<MyIssuesResult>>()
 const notificationCache = new Map<string, CacheEntry<GitHubNotification[]>>()
 const subjectStateCache = new Map<string, CacheEntry<string>>()
+
+// ---------------------------------------------------------------------------
+// Subject state persistence via Wox SDK SaveSetting/GetSetting
+// ---------------------------------------------------------------------------
+
+const STATE_SETTING_KEY = "_subjectStateCache"
+
+let _bgCtx: Context | null = null
+let _api: PublicAPI | null = null
+
+type PersistedStateEntry = { state: string; expiresAt: number }
+
+export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
+  _bgCtx = ctx
+  _api = api
+  try {
+    const raw = await api.GetSetting(ctx, STATE_SETTING_KEY)
+    if (raw) {
+      const data = JSON.parse(raw) as Record<string, PersistedStateEntry>
+      const now = Date.now()
+      for (const [url, entry] of Object.entries(data)) {
+        if (entry.expiresAt > now) {
+          subjectStateCache.set(url, { value: entry.state, expiresAt: entry.expiresAt })
+        }
+      }
+    }
+  } catch {
+    // malformed or missing – start with empty cache
+  }
+}
+
+function saveStateCacheToSettings(): void {
+  if (!_api || !_bgCtx) return
+  const data: Record<string, PersistedStateEntry> = {}
+  for (const [url, entry] of Array.from(subjectStateCache.entries())) {
+    data[url] = { state: entry.value, expiresAt: entry.expiresAt }
+  }
+  void _api.SaveSetting(_bgCtx, STATE_SETTING_KEY, JSON.stringify(data), false)
+}
 
 /**
  * Compute how long to cache a subject's state based on how old the notification is
@@ -111,7 +151,7 @@ function getIssueSortApiParams(issueSort: IssueSort): { sort: "updated" | "creat
   }
 }
 
-function compareIssues(left: GitHubIssue, right: GitHubIssue, issueSort: IssueSort): number {
+export function compareIssues(left: GitHubIssue, right: GitHubIssue, issueSort: IssueSort): number {
   switch (issueSort) {
     case "updated-asc":
       return new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime()
@@ -311,6 +351,7 @@ async function fetchSubjectState(url: string, token: string, updatedAt: string):
     const state = data.merged ? "merged" : data.state ?? null
     if (state) {
       setCached(subjectStateCache, url, state, subjectStateTtl(updatedAt, state))
+      saveStateCacheToSettings()
     }
   } catch {
     // ignore errors for individual subject state fetches
