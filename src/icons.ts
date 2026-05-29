@@ -103,6 +103,11 @@ const IconActionAccept = createSvgIcon(
   "#16A34A"
 )
 
+const IconGitHub = {
+  ImageType: "relative",
+  ImageData: "images/app.svg"
+} as WoxImage
+
 export {
   IconIssue,
   IconIssueOpen,
@@ -123,5 +128,6 @@ export {
   IconActionMarkRead,
   IconActionDone,
   IconActionUnsubscribe,
-  IconActionAccept
+  IconActionAccept,
+  IconGitHub
 }

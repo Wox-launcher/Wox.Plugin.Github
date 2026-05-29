@@ -1,4 +1,4 @@
-import { Context, Plugin, PluginInitParams, PublicAPI, Query, QueryRefinement, QueryResponse, Result, ResultAction, WoxImage } from "@wox-launcher/wox-plugin"
+import { Context, NewContext, Plugin, PluginInitParams, PublicAPI, Query, QueryRefinement, QueryResponse, Result, ResultAction, WoxImage } from "@wox-launcher/wox-plugin"
 import { spawn } from "child_process"
 import { randomUUID } from "crypto"
 import os from "os"
@@ -43,6 +43,7 @@ import {
   IconIssueOpen,
   IconNotificationInbox,
   IconNotificationInboxColored,
+  IconGitHub,
   IconPullRequestClosed,
   IconPullRequestMerged,
   IconPullRequestOpen,
@@ -53,6 +54,10 @@ import { getSettings } from "./settings"
 import { GitHubIssue, GitHubNotification, IssueSort, ParsedPluginQuery, PluginSettings } from "./types"
 
 let api: PublicAPI
+
+// Background polling state
+let pollInterval: ReturnType<typeof setInterval> | null = null
+const BG_POLL_INTERVAL_MS = 2 * 60 * 1000
 
 const ICON: WoxImage = {
   ImageType: "relative",
@@ -107,10 +112,6 @@ function notificationIcon(notification: GitHubNotification, state: string | null
     default:
       return IconNotificationInbox
   }
-}
-
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleString()
 }
 
 function buildCommandQuery(query: Query, command: string): string {
@@ -352,26 +353,6 @@ async function buildHomeResults(ctx: Context, query: Query, parsed: ParsedPlugin
     : commandResults
 }
 
-async function buildIssuePreview(ctx: Context, issue: GitHubIssue): Promise<string> {
-  const assigneeLogins = getIssueAssigneeLogins(issue)
-  const assignees = assigneeLogins.length > 0 ? assigneeLogins.join(", ") : await t(ctx, "issue_none")
-  const labels = issue.labels
-    .map(label => (typeof label === "string" ? label : label.name))
-    .filter(Boolean)
-    .join(", ")
-
-  return [
-    `# ${issue.title}`,
-    "",
-    `- ${await t(ctx, "preview_author")}: ${issue.user?.login || (await t(ctx, "issue_unknown_author"))}`,
-    `- ${await t(ctx, "preview_assignees")}: ${assignees}`,
-    `- ${await t(ctx, "preview_comments")}: ${String(issue.comments)}`,
-    `- ${await t(ctx, "preview_labels")}: ${labels || (await t(ctx, "issue_none"))}`,
-    "",
-    issue.body || `_${await t(ctx, "issue_no_description")}_`
-  ].join("\n")
-}
-
 async function buildIssueResult(ctx: Context, query: Query, settings: PluginSettings, viewerLogin: string, issue: GitHubIssue, group: string, groupScore: number): Promise<Result> {
   const repository = getIssueRepositoryFullName(issue)
   const assignedToViewer = getIssueAssigneeLogins(issue).some(login => login.toLowerCase() === viewerLogin.toLowerCase())
@@ -478,16 +459,6 @@ async function buildIssueResult(ctx: Context, query: Query, settings: PluginSett
     Group: await t(ctx, getIssueGroupTranslationKey(group)),
     GroupScore: groupScore,
     Score: toScore(issue.updated_at),
-    Preview: {
-      PreviewType: "markdown",
-      PreviewData: await buildIssuePreview(ctx, issue),
-      PreviewProperties: {
-        [await t(ctx, "preview_repository")]: repository,
-        [await t(ctx, "preview_number")]: `#${issue.number}`,
-        [await t(ctx, "preview_state")]: stateText,
-        [await t(ctx, "preview_updated")]: formatDate(issue.updated_at)
-      }
-    },
     Tails: [
       { Type: "text", Text: await tf(ctx, "issue_comments_tail", issue.comments) },
       { Type: "text", Text: stateText }
@@ -496,16 +467,11 @@ async function buildIssueResult(ctx: Context, query: Query, settings: PluginSett
   }
 }
 
-async function buildNotificationPreview(_ctx: Context, notification: GitHubNotification): Promise<string> {
-  return `# ${notification.subject.title}`
-}
-
 async function buildNotificationResult(ctx: Context, query: Query, settings: PluginSettings, notification: GitHubNotification, hasMultipleUnread: boolean): Promise<Result> {
   const notificationUrl = buildNotificationUrl(notification)
   const actions: ResultAction[] = []
   const isInvitation = notification.subject.type === "RepositoryInvitation"
   const typeText = await getNotificationTypeText(ctx, notification)
-  const reasonText = await getNotificationReasonText(ctx, notification)
 
   actions.push({
     Id: makeScopedActionId(notification.id, isInvitation ? "accept-invitation" : "open-notification"),
@@ -616,16 +582,6 @@ async function buildNotificationResult(ctx: Context, query: Query, settings: Plu
     Group: await t(ctx, notification.unread ? "group_unread" : "group_read"),
     GroupScore: notification.unread ? 200 : 100,
     Score: toScore(notification.updated_at),
-    Preview: {
-      PreviewType: "markdown",
-      PreviewData: await buildNotificationPreview(ctx, notification),
-      PreviewProperties: {
-        [await t(ctx, "preview_repository")]: notification.repository.full_name,
-        [await t(ctx, "preview_type")]: typeText,
-        [await t(ctx, "preview_reason")]: reasonText,
-        [await t(ctx, "preview_updated")]: formatDate(notification.updated_at)
-      }
-    },
     Tails: [{ Type: "text", Text: typeText }],
     Actions: actions
   }
@@ -811,6 +767,28 @@ async function queryNotifications(ctx: Context, query: Query, settings: PluginSe
   }
 }
 
+async function pollInBackground(): Promise<void> {
+  const ctx = NewContext()
+  try {
+    const settings = await getSettings(ctx, api)
+    if (!settings.personalAccessToken) return
+
+    const notifications = await listNotifications(settings)
+    const unreadNotifications = notifications.filter(n => n.unread)
+
+    if (unreadNotifications.length > 0 && typeof api.PushAttention === "function") {
+      await api.PushAttention(ctx, {
+        key: "notifications-unread",
+        title: await tf(ctx, "attention_unread_notifications", unreadNotifications.length),
+        icon: IconGitHub,
+        action: { type: "change_query", query: "gh notifications " }
+      })
+    }
+  } catch (error) {
+    void api.Log(ctx, "Error", `Background poll failed: ${getErrorMessage(error)}`)
+  }
+}
+
 export const plugin: Plugin = {
   init: async (ctx: Context, initParams: PluginInitParams) => {
     api = initParams.API
@@ -831,6 +809,19 @@ export const plugin: Plugin = {
         invalidateNotificationCaches()
       }
     })
+
+    await api.OnUnload(ctx, async () => {
+      if (pollInterval !== null) {
+        clearInterval(pollInterval)
+        pollInterval = null
+      }
+    })
+
+    // Initial seed (no attention pushes), then poll every 2 minutes
+    void pollInBackground()
+    pollInterval = setInterval(() => {
+      void pollInBackground()
+    }, BG_POLL_INTERVAL_MS)
 
     await api.Log(ctx, "Info", "GitHub plugin initialized")
   },

@@ -346,7 +346,8 @@
       "refinement_state_open": "Open",
       "refinement_state_closed": "Closed",
       "refinement_state_all": "All",
-      "refinement_sort_label": "Sort"
+      "refinement_sort_label": "Sort",
+      "attention_unread_notifications": "GitHub: %s unread notifications"
     },
     "zh_CN": {
       "plugin_name": "GitHub",
@@ -496,7 +497,8 @@
       "refinement_state_open": "开启",
       "refinement_state_closed": "已关闭",
       "refinement_state_all": "全部",
-      "refinement_sort_label": "排序"
+      "refinement_sort_label": "排序",
+      "attention_unread_notifications": "GitHub: %s 条未读通知"
     }
   }
 }
