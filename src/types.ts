@@ -2,15 +2,23 @@ import { RestEndpointMethodTypes } from "@octokit/rest"
 
 export type GitHubIssue = RestEndpointMethodTypes["search"]["issuesAndPullRequests"]["response"]["data"]["items"][number]
 
+export type GitHubIssueComment = RestEndpointMethodTypes["issues"]["listComments"]["response"]["data"][number]
+
 export type GitHubNotification = RestEndpointMethodTypes["activity"]["listNotificationsForAuthenticatedUser"]["response"]["data"][number]
 
 export type GitHubViewer = RestEndpointMethodTypes["users"]["getAuthenticated"]["response"]["data"]
+
+export type GitHubRepository = RestEndpointMethodTypes["activity"]["listReposStarredByAuthenticatedUser"]["response"]["data"][number] & {
+  starred_at?: string
+}
 
 export type RepositoryFilterMode = "all" | "include" | "exclude"
 
 export type IssueSort = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "comments-desc" | "comments-asc"
 
-export type QueryMode = "home" | "issues" | "notifications"
+export type StarredSort = "starred-desc" | "stars-desc"
+
+export type QueryMode = "home" | "issues" | "notifications" | "starred"
 
 export interface PluginSettings {
   personalAccessToken: string
@@ -35,8 +43,15 @@ export interface MyIssuesResult {
   viewerLogin: string
 }
 
+export interface IssueRef {
+  owner: string
+  repo: string
+  number: number
+}
+
 export interface ParsedPluginQuery {
   mode: QueryMode
   search: string
   unreadOnly: boolean
+  issueRef?: IssueRef
 }

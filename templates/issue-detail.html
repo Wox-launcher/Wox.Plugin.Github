@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #e6edf3;
+    background: transparent;
+    padding: 16px 20px 20px;
+  }
+  .gh-title { font-size: 26px; font-weight: 600; line-height: 1.25; margin: 0 0 12px; }
+  .gh-number { color: #9198a1; font-weight: 400; }
+  .gh-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; color: #9198a1; }
+  .gh-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; color: #fff; }
+  .gh-badge.open { background: #238636; }
+  .gh-badge.closed { background: #8957e5; }
+  .gh-badge.not_planned { background: #6e7681; }
+  .gh-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+  .gh-label { border: 1px solid #3d444d; border-radius: 999px; padding: 0 8px; font-size: 12px; color: #9198a1; }
+  .gh-comment { border: 1px solid #3d444d; border-radius: 8px; overflow: hidden; }
+  .gh-comment-hd { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(21, 27, 35, 0.72); border-bottom: 1px solid #3d444d; color: #9198a1; font-size: 13px; }
+  .gh-avatar { width: 20px; height: 20px; border-radius: 50%; }
+  .gh-comment-hd strong { color: #e6edf3; }
+  .gh-body { padding: 16px; overflow: auto; }
+  .gh-body > :first-child { margin-top: 0; }
+  .gh-body > :last-child { margin-bottom: 0; }
+  .gh-body img { max-width: 100%; height: auto; border-radius: 6px; }
+  .gh-body pre { background: #151b23; padding: 12px; border-radius: 6px; overflow: auto; }
+  .gh-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .gh-body :not(pre) > code { background: #151b23; padding: 2px 4px; border-radius: 4px; }
+  .gh-body a { color: #4493f8; }
+  .gh-body blockquote { margin: 0; padding-left: 12px; border-left: 3px solid #3d444d; color: #9198a1; }
+  .gh-body table { border-collapse: collapse; }
+  .gh-body th, .gh-body td { border: 1px solid #3d444d; padding: 6px 10px; }
+  .gh-body hr { border: 0; border-top: 1px solid #3d444d; }
+  .gh-thread { display: flex; flex-direction: column; gap: 12px; }
+</style>
+</head>
+<body>
+  <h1 class="gh-title">{{title}} <span class="gh-number">#{{number}}</span></h1>
+  <div class="gh-meta">
+    <span class="gh-badge {{badge}}">{{stateText}}</span>
+    <span><strong>{{author}}</strong> {{openedText}}</span>
+    <span>{{repository}}</span>
+  </div>
+  {{labels}}
+  <div class="gh-thread">
+    {{thread}}
+  </div>
+</body>
+</html>

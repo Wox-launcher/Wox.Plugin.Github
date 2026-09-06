@@ -1,22 +1,81 @@
-import { ParsedPluginQuery, QueryMode } from "./types"
+import { QueryHint } from "@wox-launcher/wox-plugin"
+
+import { IssueRef, ParsedPluginQuery, QueryMode } from "./types"
+
+export const ISSUE_HINT_ID = "issue"
 
 const COMMAND_ALIASES: Record<string, QueryMode> = {
   issue: "issues",
   issues: "issues",
   notification: "notifications",
-  notifications: "notifications"
+  notifications: "notifications",
+  star: "starred",
+  stars: "starred",
+  starred: "starred"
 }
+
+const ISSUE_REF_PATTERN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/
 
 function normalizeSearch(input: string): string {
   return input.trim().replace(/\s+/g, " ")
 }
 
-export function parsePluginQuery(command: string | undefined, search: string): ParsedPluginQuery {
+export function buildIssueDetailQuery(triggerKeyword: string, repository: string, issueNumber: number): { QueryText: string; QueryHint: QueryHint } {
+  const trigger = triggerKeyword.trim() || "gh"
+  const issueRef = `${repository}#${issueNumber}`
+  const commandPrefix = `${trigger} issues `
+  return {
+    QueryText: `${commandPrefix}${issueRef}`,
+    QueryHint: {
+      Elements: [
+        { Id: "command", Kind: "text", Text: commandPrefix },
+        { Id: ISSUE_HINT_ID, Kind: "block", Value: issueRef }
+      ]
+    }
+  }
+}
+
+export function parseIssueRefFromHint(hint?: QueryHint): IssueRef | undefined {
+  const issue = hint?.Elements.find(element => element.Id === ISSUE_HINT_ID && element.Kind === "block")
+  if (!issue || issue.Kind !== "block") {
+    return undefined
+  }
+
+  return parseIssueRef(issue.Value)
+}
+
+export function parseIssueRef(input: string): IssueRef | undefined {
+  const match = ISSUE_REF_PATTERN.exec(input.trim())
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    owner: match[1],
+    repo: match[2],
+    number: parseInt(match[3], 10)
+  }
+}
+
+function withIssueRef(parsed: ParsedPluginQuery, hint?: QueryHint): ParsedPluginQuery {
+  if (parsed.mode !== "issues") {
+    return parsed
+  }
+
+  const issueRef = parseIssueRefFromHint(hint) || parseIssueRef(parsed.search)
+  return issueRef ? { ...parsed, issueRef } : parsed
+}
+
+export function parsePluginQuery(command: string | undefined, search: string, hint?: QueryHint): ParsedPluginQuery {
   const normalizedCommand = (command || "").trim().toLowerCase()
   const normalizedSearch = normalizeSearch(search)
 
   if (normalizedCommand === "issues") {
-    return { mode: "issues", search: normalizedSearch, unreadOnly: false }
+    return withIssueRef({ mode: "issues", search: normalizedSearch, unreadOnly: false }, hint)
+  }
+
+  if (normalizedCommand === "starred") {
+    return { mode: "starred", search: normalizedSearch, unreadOnly: false }
   }
 
   if (normalizedCommand === "notifications") {
@@ -49,7 +108,7 @@ export function parsePluginQuery(command: string | undefined, search: string): P
         return { mode, search: "", unreadOnly: true }
       }
 
-      return { mode, search: rest, unreadOnly: false }
+      return withIssueRef({ mode, search: rest, unreadOnly: false }, hint)
     }
   }
 

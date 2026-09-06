@@ -1,3 +1,5 @@
+import { applyHtmlTemplate, loadHtmlTemplate } from "./html-template"
+
 type NotificationSubject = {
   type: string
   title: string
@@ -10,7 +12,7 @@ type NotificationRepository = {
   html_url: string
 }
 
-export type NotificationSubjectState = "open" | "closed" | "merged" | null
+export type NotificationSubjectState = "open" | "closed" | "not_planned" | "merged" | null
 
 export type NotificationLike = {
   id: string
@@ -131,17 +133,177 @@ export function getNotificationSubtitle(notification: NotificationLike): string 
   return parts.join(" • ")
 }
 
-export function getNotificationSubjectStateFromApiData(subjectType: string, data: { state?: unknown; merged?: unknown; merged_at?: unknown }): NotificationSubjectState {
+export function getNotificationSubjectStateFromApiData(subjectType: string, data: { state?: unknown; merged?: unknown; merged_at?: unknown; state_reason?: unknown }): NotificationSubjectState {
   if (subjectType === "PullRequest" && (data.merged === true || (typeof data.merged_at === "string" && data.merged_at.length > 0))) {
     return "merged"
   }
 
   const normalizedState = typeof data.state === "string" ? data.state.toLowerCase() : ""
-  if (normalizedState === "open" || normalizedState === "closed") {
-    return normalizedState
+  if (normalizedState === "open") {
+    return "open"
+  }
+
+  if (normalizedState === "closed") {
+    const reason = typeof data.state_reason === "string" ? data.state_reason.toLowerCase() : ""
+    if (reason === "not_planned" || reason === "duplicate") {
+      return "not_planned"
+    }
+
+    return "closed"
   }
 
   return null
+}
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+export function formatCompactIssueDate(dateString: string, now = Date.now()): string {
+  const timestamp = new Date(dateString).getTime()
+  if (Number.isNaN(timestamp)) {
+    return ""
+  }
+
+  const diffMs = Math.max(0, now - timestamp)
+  if (diffMs < MINUTE_MS) {
+    return "now"
+  }
+  if (diffMs < HOUR_MS) {
+    return `${Math.floor(diffMs / MINUTE_MS)}m`
+  }
+  if (diffMs < DAY_MS) {
+    return `${Math.floor(diffMs / HOUR_MS)}h`
+  }
+  if (diffMs < 2 * DAY_MS) {
+    return "1d"
+  }
+
+  const date = new Date(timestamp)
+  const compactDate = `${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}`
+  if (date.getFullYear() === new Date(now).getFullYear()) {
+    return compactDate
+  }
+
+  return `${compactDate}, ${date.getFullYear()}`
+}
+
+export type IssueHtmlBadge = "open" | "closed" | "not_planned"
+
+export function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+export function getIssueHtmlBadge(issue: { state?: string | null; state_reason?: string | null }): IssueHtmlBadge {
+  if (issue.state === "closed") {
+    if (issue.state_reason === "not_planned" || issue.state_reason === "duplicate") {
+      return "not_planned"
+    }
+    return "closed"
+  }
+
+  return "open"
+}
+
+function stripScripts(html: string): string {
+  return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+}
+
+export function toIssueBodyHtml(body: string | null | undefined, emptyBody: string): string {
+  const text = body?.trim() || emptyBody
+  const withImages = text.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, (_match, alt: string, src: string) => `\n\n<img alt="${escapeHtml(alt)}" src="${escapeHtml(src)}">\n\n`)
+  if (/<[a-z][\s\S]*>/i.test(withImages)) {
+    return stripScripts(
+      withImages
+        .split(/\n{2,}/)
+        .map(block => {
+          const trimmed = block.trim()
+          if (!trimmed) {
+            return ""
+          }
+          if (/<[a-z][\s\S]*>/i.test(trimmed)) {
+            return trimmed.replace(/\n/g, "<br>")
+          }
+          return `<p>${escapeHtml(trimmed).replace(/\n/g, "<br>")}</p>`
+        })
+        .join("")
+    )
+  }
+
+  return `<p>${escapeHtml(withImages)
+    .replace(/\n{2,}/g, "</p><p>")
+    .replace(/\n/g, "<br>")}</p>`
+}
+
+export type IssueCommentHtmlInput = {
+  author: string
+  avatarUrl?: string
+  createdText: string
+  body?: string | null
+}
+
+function renderIssueCommentHtml(comment: IssueCommentHtmlInput, emptyBody: string): string {
+  const avatar = comment.avatarUrl ? `<img class="gh-avatar" src="${escapeHtml(getSizedAvatarUrl(comment.avatarUrl, 40))}" alt="">` : ""
+  return applyHtmlTemplate(loadHtmlTemplate("issue-comment.html"), {
+    avatar,
+    author: escapeHtml(comment.author),
+    createdText: escapeHtml(comment.createdText),
+    body: toIssueBodyHtml(comment.body, emptyBody)
+  })
+}
+
+export function formatGitHubIssueHtml(options: {
+  title: string
+  number: number
+  body?: string | null
+  repository: string
+  stateText: string
+  badge: IssueHtmlBadge
+  author: string
+  avatarUrl?: string
+  openedText: string
+  emptyBody: string
+  labels?: Array<string | { name?: string | null; color?: string | null }>
+  comments?: IssueCommentHtmlInput[]
+}): string {
+  const labels = (options.labels || []).map(label => (typeof label === "string" ? { name: label, color: "" } : { name: label.name || "", color: label.color || "" })).filter(label => label.name)
+  const labelHtml = labels
+    .map(label => {
+      const color = /^[0-9a-f]{3,8}$/i.test(label.color) ? `#${label.color}` : ""
+      const style = color ? ` style="border-color:${color};color:${color}"` : ""
+      return `<span class="gh-label"${style}>${escapeHtml(label.name)}</span>`
+    })
+    .join("")
+  const thread = [
+    renderIssueCommentHtml(
+      {
+        author: options.author,
+        avatarUrl: options.avatarUrl,
+        createdText: options.openedText,
+        body: options.body
+      },
+      options.emptyBody
+    ),
+    ...(options.comments || []).map(comment => renderIssueCommentHtml(comment, options.emptyBody))
+  ].join("")
+
+  return applyHtmlTemplate(loadHtmlTemplate("issue-detail.html"), {
+    title: escapeHtml(options.title),
+    number: String(options.number),
+    badge: options.badge,
+    stateText: escapeHtml(options.stateText),
+    author: escapeHtml(options.author),
+    openedText: escapeHtml(options.openedText),
+    repository: escapeHtml(options.repository),
+    labels: labelHtml ? `<div class="gh-labels">${labelHtml}</div>` : "",
+    thread
+  })
+}
+
+export function getSizedAvatarUrl(avatarUrl: string, size = 40): string {
+  const separator = avatarUrl.includes("?") ? "&" : "?"
+  return `${avatarUrl}${separator}s=${size}`
 }
 
 export function buildNotificationUrl(notification: NotificationLike): string {

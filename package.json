@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "Wox plugin for GitHub issues and notifications",
   "scripts": {
-    "build": "pnpm clean && ncc build src/index.ts -o dist && babel dist --out-dir dist && node -e \"const{cpSync}=require('fs');cpSync('images','dist/images',{recursive:true});cpSync('plugin.json','dist/plugin.json')\"",
-    "package": "pnpm build && cd dist && zip -r ../wox.plugin.github.wox *.js *.json images",
-    "dev": "nodemon --watch src --watch images --watch plugin.json --ext json,ts,js,mjs,png --exec pnpm run build",
+    "build": "pnpm clean && ncc build src/index.ts -o dist && babel dist --out-dir dist && node -e \"const{cpSync}=require('fs');cpSync('images','dist/images',{recursive:true});cpSync('plugin.json','dist/plugin.json');cpSync('templates','dist/templates',{recursive:true})\"",
+    "package": "pnpm build && cd dist && zip -r ../wox.plugin.github.wox *.js *.json images templates",
+    "dev": "nodemon --watch src --watch images --watch plugin.json --watch templates --ext json,ts,js,mjs,png,html --exec pnpm run build",
     "clean": "node -e \"var { rmSync, existsSync } = require('fs'), path = require('path'); ['./dist'].forEach(fPath => {if (existsSync(path.join(__dirname, fPath))) rmSync(path.join(__dirname, fPath), { recursive: true, force: true })}); process.exit(0);\"",
     "clean:all": "pnpm run clean && (rm -r ./node_modules || true)",
     "lint": "eslint src",
@@ -33,6 +33,6 @@
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",
-    "@wox-launcher/wox-plugin": "^0.0.133"
+    "@wox-launcher/wox-plugin": "^0.0.138"
   }
 }

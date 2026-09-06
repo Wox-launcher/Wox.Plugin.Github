@@ -1,8 +1,8 @@
 import { Context, PublicAPI } from "@wox-launcher/wox-plugin"
 import { Octokit } from "@octokit/rest"
 
-import { getNotificationReasonLabel, getNotificationTypeTitle } from "./github-format"
-import { GitHubIssue, GitHubNotification, GitHubViewer, IssueSection, IssueSort, MyIssuesResult, PluginSettings } from "./types"
+import { getNotificationReasonLabel, getNotificationSubjectStateFromApiData, getNotificationTypeTitle } from "./github-format"
+import { GitHubIssue, GitHubIssueComment, GitHubNotification, GitHubRepository, GitHubViewer, IssueSection, IssueSort, MyIssuesResult, PluginSettings, StarredSort } from "./types"
 
 type CacheEntry<T> = {
   expiresAt: number
@@ -10,26 +10,42 @@ type CacheEntry<T> = {
 }
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+const MAX_OPEN_ISSUE_AGE_DAYS = 365
 const VIEWER_CACHE_TTL_MS = 10 * 60 * 1000
 const ISSUE_CACHE_TTL_MS = 45 * 1000
 const NOTIFICATION_CACHE_TTL_MS = 20 * 1000
+const STARRED_CACHE_TTL_MS = 30 * 60 * 1000
+const STARRED_STALE_MAX_AGE_MS = 7 * DAY_IN_MS
+const STARRED_PER_PAGE = 100
+const STARRED_MAX_PAGES = 2
 
 const clientCache = new Map<string, Octokit>()
 const viewerCache = new Map<string, CacheEntry<GitHubViewer>>()
 const issuesCache = new Map<string, CacheEntry<MyIssuesResult>>()
 const notificationCache = new Map<string, CacheEntry<GitHubNotification[]>>()
+const starredCache = new Map<string, CacheEntry<GitHubRepository[]>>()
 const subjectStateCache = new Map<string, CacheEntry<string>>()
 
 // ---------------------------------------------------------------------------
 // Subject state persistence via Wox SDK SaveSetting/GetSetting
 // ---------------------------------------------------------------------------
 
-const STATE_SETTING_KEY = "_subjectStateCache"
+const STATE_SETTING_KEY = "_subjectStateCacheV2"
+const STARRED_SETTING_KEY = "_starredReposCache"
 
 let _bgCtx: Context | null = null
 let _api: PublicAPI | null = null
 
 type PersistedStateEntry = { state: string; expiresAt: number }
+
+type PersistedStarredCache = {
+  key: string
+  fetchedAt: number
+  expiresAt: number
+  repos: GitHubRepository[]
+}
+
+const starredRefreshInFlight = new Map<string, Promise<GitHubRepository[]>>()
 
 export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   _bgCtx = ctx
@@ -48,6 +64,8 @@ export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   } catch {
     // malformed or missing – start with empty cache
   }
+
+  await loadStarredCacheFromSettings()
 }
 
 function saveStateCacheToSettings(): void {
@@ -57,6 +75,62 @@ function saveStateCacheToSettings(): void {
     data[url] = { state: entry.value, expiresAt: entry.expiresAt }
   }
   void _api.SaveSetting(_bgCtx, STATE_SETTING_KEY, JSON.stringify(data), false)
+}
+
+function toCachedStarredRepo(repo: GitHubRepository): GitHubRepository {
+  return {
+    id: repo.id,
+    name: repo.name,
+    full_name: repo.full_name,
+    description: repo.description,
+    language: repo.language,
+    stargazers_count: repo.stargazers_count,
+    html_url: repo.html_url,
+    starred_at: repo.starred_at,
+    owner: repo.owner
+      ? {
+          login: repo.owner.login,
+          avatar_url: repo.owner.avatar_url
+        }
+      : null
+  } as GitHubRepository
+}
+
+async function loadStarredCacheFromSettings(): Promise<void> {
+  if (!_api || !_bgCtx) return
+  try {
+    const raw = await _api.GetSetting(_bgCtx, STARRED_SETTING_KEY)
+    if (!raw) return
+    const data = JSON.parse(raw) as PersistedStarredCache
+    if (!data?.key || !Array.isArray(data.repos)) return
+    if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
+    starredCache.set(data.key, { value: data.repos, expiresAt: data.expiresAt })
+  } catch {
+    // malformed or missing
+  }
+}
+
+function saveStarredCacheToSettings(key: string, repos: GitHubRepository[], expiresAt: number): void {
+  if (!_api || !_bgCtx) return
+  const payload: PersistedStarredCache = {
+    key,
+    fetchedAt: Date.now(),
+    expiresAt,
+    repos
+  }
+  void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, JSON.stringify(payload), false)
+}
+
+function getStarredCacheEntry(key: string): { repos: GitHubRepository[]; fresh: boolean } | null {
+  const entry = starredCache.get(key)
+  if (!entry) {
+    return null
+  }
+
+  return {
+    repos: entry.value,
+    fresh: entry.expiresAt >= Date.now()
+  }
 }
 
 /**
@@ -90,7 +164,7 @@ function subjectStateTtl(updatedAt: string, state: string): number {
     baseTtl = 6 * 60 * 60 * 1000
   }
 
-  const isTerminal = state === "closed" || state === "merged"
+  const isTerminal = state === "closed" || state === "not_planned" || state === "merged"
   return isTerminal ? baseTtl * 10 : baseTtl
 }
 
@@ -131,6 +205,15 @@ function normalizeQuery(input: string): string {
 function formatDate(daysAgo: number): string {
   const date = new Date(Date.now() - daysAgo * DAY_IN_MS)
   return date.toISOString().slice(0, 10)
+}
+
+function isIssueCreatedWithinDays(issue: Pick<GitHubIssue, "created_at">, days: number, now = Date.now()): boolean {
+  const createdAt = new Date(issue.created_at).getTime()
+  if (Number.isNaN(createdAt)) {
+    return false
+  }
+
+  return now - createdAt <= days * DAY_IN_MS
 }
 
 function getIssueSortApiParams(issueSort: IssueSort): { sort: "updated" | "created" | "comments"; order: "asc" | "desc" } {
@@ -246,7 +329,8 @@ export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesRes
     showRecentlyClosed: settings.showRecentlyClosed,
     repositoryFilterMode: settings.repositoryFilterMode,
     repositoryList: settings.repositoryList,
-    numberOfResults: settings.numberOfResults
+    numberOfResults: settings.numberOfResults,
+    createdSince: formatDate(MAX_OPEN_ISSUE_AGE_DAYS)
   })
   const cached = getCached(issuesCache, cacheKey)
   if (cached) {
@@ -254,24 +338,25 @@ export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesRes
   }
 
   const viewer = await getViewer(settings)
+  const createdSince = `created:>=${formatDate(MAX_OPEN_ISSUE_AGE_DAYS)}`
   const definitions: Array<{ enabled: boolean; group: string; groupScore: number; query: string; recentlyClosed?: boolean }> = [
     {
       enabled: settings.showCreated,
       group: "Created",
       groupScore: 400,
-      query: `is:issue author:${viewer.login} archived:false is:open`
+      query: `is:issue author:${viewer.login} archived:false is:open ${createdSince}`
     },
     {
       enabled: settings.showAssigned,
       group: "Assigned",
       groupScore: 300,
-      query: `is:issue assignee:${viewer.login} archived:false is:open`
+      query: `is:issue assignee:${viewer.login} archived:false is:open ${createdSince}`
     },
     {
       enabled: settings.showMentioned,
       group: "Mentioned",
       groupScore: 200,
-      query: `is:issue mentions:${viewer.login} archived:false is:open`
+      query: `is:issue mentions:${viewer.login} archived:false is:open ${createdSince}`
     }
   ]
 
@@ -314,7 +399,7 @@ export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesRes
         group: definition.group,
         groupScore: definition.groupScore,
         recentlyClosed: definition.recentlyClosed === true,
-        issues: await runIssueSearch(settings, definition.query)
+        issues: (await runIssueSearch(settings, definition.query)).filter(issue => definition.recentlyClosed === true || isIssueCreatedWithinDays(issue, MAX_OPEN_ISSUE_AGE_DAYS))
       }))
   )
 
@@ -336,7 +421,57 @@ export async function getMyIssues(settings: PluginSettings): Promise<MyIssuesRes
   return setCached(issuesCache, cacheKey, { viewerLogin: viewer.login, sections }, ISSUE_CACHE_TTL_MS)
 }
 
-async function fetchSubjectState(url: string, token: string, updatedAt: string): Promise<void> {
+export async function getIssueByRef(settings: PluginSettings, owner: string, repo: string, issueNumber: number): Promise<GitHubIssue> {
+  const client = getClient(settings.personalAccessToken)
+
+  try {
+    const response = await client.issues.get({
+      owner,
+      repo,
+      issue_number: issueNumber
+    })
+    if (response.data.body) {
+      return response.data as GitHubIssue
+    }
+  } catch {
+    // fall through to cache
+  }
+
+  const cached = await getMyIssues(settings)
+  const fullName = `${owner}/${repo}`.toLowerCase()
+  for (const section of cached.sections) {
+    const found = section.issues.find(issue => getIssueRepositoryFullName(issue) === fullName && issue.number === issueNumber)
+    if (found?.body) {
+      return found
+    }
+  }
+
+  const response = await client.issues.get({
+    owner,
+    repo,
+    issue_number: issueNumber
+  })
+  return response.data as GitHubIssue
+}
+
+const ISSUE_COMMENT_PAGE_SIZE = 50
+
+export async function listIssueComments(settings: PluginSettings, owner: string, repo: string, issueNumber: number): Promise<GitHubIssueComment[]> {
+  try {
+    const client = getClient(settings.personalAccessToken)
+    const response = await client.issues.listComments({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      per_page: ISSUE_COMMENT_PAGE_SIZE
+    })
+    return response.data
+  } catch {
+    return []
+  }
+}
+
+async function fetchSubjectState(url: string, subjectType: string, token: string, updatedAt: string): Promise<void> {
   if (getCached(subjectStateCache, url) !== null) return
   try {
     const response = await fetch(url, {
@@ -347,8 +482,8 @@ async function fetchSubjectState(url: string, token: string, updatedAt: string):
       }
     })
     if (!response.ok) return
-    const data = (await response.json()) as { state?: string; merged?: boolean }
-    const state = data.merged ? "merged" : data.state ?? null
+    const data = (await response.json()) as { state?: string; merged?: boolean; merged_at?: string; state_reason?: string }
+    const state = getNotificationSubjectStateFromApiData(subjectType, data)
     if (state) {
       setCached(subjectStateCache, url, state, subjectStateTtl(updatedAt, state))
       saveStateCacheToSettings()
@@ -385,7 +520,7 @@ export async function listNotifications(settings: PluginSettings): Promise<GitHu
   // Each fetch is skipped if a valid cache entry already exists, so re-runs
   // only hit the network for entries whose TTL has expired.
   const subjectItems = notifications.filter(n => (n.subject.type === "Issue" || n.subject.type === "PullRequest") && n.subject.url)
-  void Promise.allSettled(subjectItems.map(n => fetchSubjectState(n.subject.url, settings.personalAccessToken, n.updated_at)))
+  void Promise.allSettled(subjectItems.map(n => fetchSubjectState(n.subject.url, n.subject.type, settings.personalAccessToken, n.updated_at)))
 
   return setCached(notificationCache, cacheKey, notifications, NOTIFICATION_CACHE_TTL_MS)
 }
@@ -413,6 +548,98 @@ export function matchesIssueSearch(issue: GitHubIssue, searchText: string): bool
   )
 }
 
+function normalizeStarredRepo(item: unknown): GitHubRepository {
+  if (!item || typeof item !== "object") {
+    throw new Error("Invalid starred repository payload")
+  }
+
+  const payload = item as { starred_at?: string; repo?: GitHubRepository }
+  if (payload.repo) {
+    return { ...payload.repo, starred_at: payload.starred_at }
+  }
+
+  return item as GitHubRepository
+}
+
+async function refreshStarredRepos(settings: PluginSettings, cacheKey: string): Promise<GitHubRepository[]> {
+  const inFlight = starredRefreshInFlight.get(cacheKey)
+  if (inFlight) {
+    return inFlight
+  }
+
+  const request = (async () => {
+    const client = getClient(settings.personalAccessToken)
+    const repos: GitHubRepository[] = []
+
+    for (let page = 1; page <= STARRED_MAX_PAGES; page++) {
+      const response = await client.activity.listReposStarredByAuthenticatedUser({
+        sort: "created",
+        direction: "desc",
+        per_page: STARRED_PER_PAGE,
+        page,
+        headers: {
+          accept: "application/vnd.github.star+json"
+        }
+      })
+      repos.push(...response.data.map(item => toCachedStarredRepo(normalizeStarredRepo(item))))
+      if (response.data.length < STARRED_PER_PAGE) {
+        break
+      }
+    }
+
+    const cached = setCached(starredCache, cacheKey, repos, STARRED_CACHE_TTL_MS)
+    saveStarredCacheToSettings(cacheKey, cached, Date.now() + STARRED_CACHE_TTL_MS)
+    return cached
+  })().finally(() => {
+    starredRefreshInFlight.delete(cacheKey)
+  })
+
+  starredRefreshInFlight.set(cacheKey, request)
+  return request
+}
+
+export async function listStarredRepos(settings: PluginSettings): Promise<GitHubRepository[]> {
+  const cacheKey = JSON.stringify({
+    token: settings.personalAccessToken
+  })
+  const cached = getStarredCacheEntry(cacheKey)
+  if (cached?.fresh) {
+    return cached.repos
+  }
+
+  if (cached) {
+    void refreshStarredRepos(settings, cacheKey)
+    return cached.repos
+  }
+
+  return refreshStarredRepos(settings, cacheKey)
+}
+
+export function compareStarredRepos(left: GitHubRepository, right: GitHubRepository, sort: StarredSort): number {
+  switch (sort) {
+    case "stars-desc":
+      return right.stargazers_count - left.stargazers_count
+    case "starred-desc":
+    default:
+      return new Date(right.starred_at || 0).getTime() - new Date(left.starred_at || 0).getTime()
+  }
+}
+
+export function matchesRepositorySearch(repository: GitHubRepository, searchText: string): boolean {
+  if (!searchText) {
+    return true
+  }
+
+  const lower = searchText.toLowerCase()
+  return (
+    repository.full_name.toLowerCase().includes(lower) ||
+    repository.name.toLowerCase().includes(lower) ||
+    (repository.description || "").toLowerCase().includes(lower) ||
+    (repository.language || "").toLowerCase().includes(lower) ||
+    (repository.owner?.login || "").toLowerCase().includes(lower)
+  )
+}
+
 export function matchesNotificationSearch(notification: GitHubNotification, searchText: string): boolean {
   if (!searchText) {
     return true
@@ -434,6 +661,14 @@ export function invalidateIssueCaches(): void {
 export function invalidateNotificationCaches(): void {
   notificationCache.clear()
   subjectStateCache.clear()
+}
+
+export function invalidateStarredCaches(): void {
+  starredCache.clear()
+  starredRefreshInFlight.clear()
+  if (_api && _bgCtx) {
+    void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, "", false)
+  }
 }
 
 export async function assignIssueToViewer(settings: PluginSettings, issue: GitHubIssue): Promise<void> {
