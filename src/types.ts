@@ -18,7 +18,16 @@ export type IssueSort = "updated-desc" | "updated-asc" | "created-desc" | "creat
 
 export type StarredSort = "starred-desc" | "stars-desc"
 
-export type QueryMode = "home" | "issues" | "notifications" | "starred"
+export type QueryMode = "home" | "issues" | "notifications" | "starred" | "lists"
+
+export interface GitHubUserList {
+  id: string
+  name: string
+  description: string | null
+  slug: string
+  isPrivate: boolean
+  itemsCount: number
+}
 
 export interface PluginSettings {
   personalAccessToken: string
@@ -54,4 +63,5 @@ export interface ParsedPluginQuery {
   search: string
   unreadOnly: boolean
   issueRef?: IssueRef
+  listName?: string
 }

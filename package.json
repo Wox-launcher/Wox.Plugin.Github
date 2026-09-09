@@ -1,6 +1,6 @@
 {
   "name": "github",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Wox plugin for GitHub issues and notifications",
   "scripts": {
     "build": "pnpm clean && ncc build src/index.ts -o dist && babel dist --out-dir dist && node -e \"const{cpSync}=require('fs');cpSync('images','dist/images',{recursive:true});cpSync('plugin.json','dist/plugin.json');cpSync('templates','dist/templates',{recursive:true})\"",

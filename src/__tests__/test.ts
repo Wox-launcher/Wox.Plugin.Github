@@ -11,7 +11,8 @@ import {
   toIssueBodyHtml
 } from "../github-format"
 import { applyHtmlTemplate } from "../html-template"
-import { buildIssueDetailQuery, parseIssueRef, parseIssueRefFromHint, parsePluginQuery } from "../query"
+import { buildIssueDetailQuery, buildListDetailQuery, parseIssueRef, parseIssueRefFromHint, parsePluginQuery } from "../query"
+import { resolveUserListQuery } from "../list-query"
 import { parseRepositoryList } from "../settings"
 
 describe("parsePluginQuery", () => {
@@ -86,6 +87,30 @@ describe("parsePluginQuery", () => {
     })
   })
 
+  test("parses lists command from explicit command and search alias", () => {
+    expect(parsePluginQuery("lists", "AI")).toEqual({
+      mode: "lists",
+      search: "AI",
+      unreadOnly: false
+    })
+    expect(parsePluginQuery(undefined, "lists Launcher")).toEqual({
+      mode: "lists",
+      search: "Launcher",
+      unreadOnly: false
+    })
+  })
+
+  test("reads list name from a query hint block", () => {
+    const query = buildListDetailQuery("gh", "桌面技术栈")
+    expect(query.QueryText).toBe("gh lists 桌面技术栈")
+    expect(parsePluginQuery("lists", "桌面技术栈", query.QueryHint)).toEqual({
+      mode: "lists",
+      search: "桌面技术栈",
+      unreadOnly: false,
+      listName: "桌面技术栈"
+    })
+  })
+
   test("parses notifications unread shortcut from search text", () => {
     expect(parsePluginQuery(undefined, "notifications unread triage")).toEqual({
       mode: "notifications",
@@ -98,6 +123,28 @@ describe("parsePluginQuery", () => {
 describe("parseRepositoryList", () => {
   test("parses comma and newline separated repositories", () => {
     expect(parseRepositoryList("Foo/Bar,\nfoo/bar\nbaz/qux")).toEqual(["foo/bar", "baz/qux"])
+  })
+})
+
+describe("resolveUserListQuery", () => {
+  const lists = [
+    { id: "1", name: "AI", description: null, slug: "ai", isPrivate: false, itemsCount: 23 },
+    { id: "2", name: "Launcher", description: null, slug: "launcher", isPrivate: false, itemsCount: 21 }
+  ]
+
+  test("opens a list on exact name match and treats extra text as repo search", () => {
+    expect(resolveUserListQuery(lists, "AI flutter")).toEqual({
+      list: lists[0],
+      repoSearch: "flutter",
+      listSearch: ""
+    })
+  })
+
+  test("filters lists when the name is not an exact match", () => {
+    expect(resolveUserListQuery(lists, "laun")).toEqual({
+      listSearch: "laun",
+      repoSearch: ""
+    })
   })
 })
 

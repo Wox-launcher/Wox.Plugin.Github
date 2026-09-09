@@ -2,7 +2,7 @@ import { Context, PublicAPI } from "@wox-launcher/wox-plugin"
 import { Octokit } from "@octokit/rest"
 
 import { getNotificationReasonLabel, getNotificationSubjectStateFromApiData, getNotificationTypeTitle } from "./github-format"
-import { GitHubIssue, GitHubIssueComment, GitHubNotification, GitHubRepository, GitHubViewer, IssueSection, IssueSort, MyIssuesResult, PluginSettings, StarredSort } from "./types"
+import { GitHubIssue, GitHubIssueComment, GitHubNotification, GitHubRepository, GitHubUserList, GitHubViewer, IssueSection, IssueSort, MyIssuesResult, PluginSettings, StarredSort } from "./types"
 
 type CacheEntry<T> = {
   expiresAt: number
@@ -14,16 +14,26 @@ const MAX_OPEN_ISSUE_AGE_DAYS = 365
 const VIEWER_CACHE_TTL_MS = 10 * 60 * 1000
 const ISSUE_CACHE_TTL_MS = 45 * 1000
 const NOTIFICATION_CACHE_TTL_MS = 20 * 1000
-const STARRED_CACHE_TTL_MS = 30 * 60 * 1000
+const STARRED_FIRST_PAGE_TTL_MS = 5 * 60 * 1000
+const STARRED_FULL_SYNC_TTL_MS = 2 * 60 * 60 * 1000
 const STARRED_STALE_MAX_AGE_MS = 7 * DAY_IN_MS
 const STARRED_PER_PAGE = 100
-const STARRED_MAX_PAGES = 2
+const LISTS_CACHE_TTL_MS = 10 * 60 * 1000
+const LISTS_ITEMS_CACHE_TTL_MS = 10 * 60 * 1000
+
+type StarredCacheRecord = {
+  repos: GitHubRepository[]
+  firstPageSyncedAt: number
+  fullSyncedAt: number
+}
 
 const clientCache = new Map<string, Octokit>()
 const viewerCache = new Map<string, CacheEntry<GitHubViewer>>()
 const issuesCache = new Map<string, CacheEntry<MyIssuesResult>>()
 const notificationCache = new Map<string, CacheEntry<GitHubNotification[]>>()
-const starredCache = new Map<string, CacheEntry<GitHubRepository[]>>()
+const starredCache = new Map<string, StarredCacheRecord>()
+const listsCache = new Map<string, CacheEntry<StarListsResult>>()
+const listItemsCache = new Map<string, CacheEntry<GitHubRepository[]>>()
 const subjectStateCache = new Map<string, CacheEntry<string>>()
 
 // ---------------------------------------------------------------------------
@@ -31,7 +41,8 @@ const subjectStateCache = new Map<string, CacheEntry<string>>()
 // ---------------------------------------------------------------------------
 
 const STATE_SETTING_KEY = "_subjectStateCacheV2"
-const STARRED_SETTING_KEY = "_starredReposCache"
+const STARRED_SETTING_KEY = "_starredReposCacheV2"
+const LISTS_SETTING_KEY = "_starListsCache"
 
 let _bgCtx: Context | null = null
 let _api: PublicAPI | null = null
@@ -41,11 +52,71 @@ type PersistedStateEntry = { state: string; expiresAt: number }
 type PersistedStarredCache = {
   key: string
   fetchedAt: number
-  expiresAt: number
+  firstPageSyncedAt?: number
+  fullSyncedAt?: number
   repos: GitHubRepository[]
 }
 
-const starredRefreshInFlight = new Map<string, Promise<GitHubRepository[]>>()
+type StarListsResult = {
+  viewerLogin: string
+  lists: GitHubUserList[]
+}
+
+type PersistedListsCache = {
+  key: string
+  fetchedAt: number
+  expiresAt: number
+  viewerLogin: string
+  lists: GitHubUserList[]
+}
+
+type GraphQLPageInfo = {
+  hasNextPage: boolean
+  endCursor?: string | null
+}
+
+type GraphQLUserListNode = {
+  id: string
+  name: string
+  description?: string | null
+  slug: string
+  isPrivate: boolean
+  items?: { totalCount?: number }
+}
+
+type GraphQLRepositoryNode = {
+  databaseId?: number | null
+  name: string
+  nameWithOwner: string
+  description?: string | null
+  url: string
+  stargazerCount: number
+  primaryLanguage?: { name?: string | null } | null
+  owner?: { login: string; avatarUrl?: string | null } | null
+}
+
+type StarListsQuery = {
+  viewer?: {
+    login?: string
+    lists?: {
+      pageInfo?: GraphQLPageInfo
+      nodes?: Array<GraphQLUserListNode | null>
+    }
+  }
+}
+
+type StarListItemsQuery = {
+  node?: {
+    items?: {
+      pageInfo?: GraphQLPageInfo
+      nodes?: Array<GraphQLRepositoryNode | null>
+    }
+  } | null
+}
+
+const starredRefreshInFlight = new Map<string, { kind: "page1" | "full"; promise: Promise<GitHubRepository[]> }>()
+const listsRefreshInFlight = new Map<string, Promise<StarListsResult>>()
+const listItemsRefreshInFlight = new Map<string, Promise<GitHubRepository[]>>()
 
 export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   _bgCtx = ctx
@@ -66,6 +137,7 @@ export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   }
 
   await loadStarredCacheFromSettings()
+  await loadListsCacheFromSettings()
 }
 
 function saveStateCacheToSettings(): void {
@@ -104,32 +176,71 @@ async function loadStarredCacheFromSettings(): Promise<void> {
     const data = JSON.parse(raw) as PersistedStarredCache
     if (!data?.key || !Array.isArray(data.repos)) return
     if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
-    starredCache.set(data.key, { value: data.repos, expiresAt: data.expiresAt })
+    starredCache.set(data.key, {
+      repos: data.repos,
+      firstPageSyncedAt: data.firstPageSyncedAt ?? data.fetchedAt,
+      fullSyncedAt: data.fullSyncedAt ?? 0
+    })
   } catch {
     // malformed or missing
   }
 }
 
-function saveStarredCacheToSettings(key: string, repos: GitHubRepository[], expiresAt: number): void {
+function saveStarredCacheToSettings(key: string, record: StarredCacheRecord): void {
   if (!_api || !_bgCtx) return
   const payload: PersistedStarredCache = {
     key,
     fetchedAt: Date.now(),
-    expiresAt,
-    repos
+    firstPageSyncedAt: record.firstPageSyncedAt,
+    fullSyncedAt: record.fullSyncedAt,
+    repos: record.repos
   }
   void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, JSON.stringify(payload), false)
 }
 
-function getStarredCacheEntry(key: string): { repos: GitHubRepository[]; fresh: boolean } | null {
+function setStarredCache(key: string, record: StarredCacheRecord): GitHubRepository[] {
+  starredCache.set(key, record)
+  saveStarredCacheToSettings(key, record)
+  return record.repos
+}
+
+async function loadListsCacheFromSettings(): Promise<void> {
+  if (!_api || !_bgCtx) return
+  try {
+    const raw = await _api.GetSetting(_bgCtx, LISTS_SETTING_KEY)
+    if (!raw) return
+    const data = JSON.parse(raw) as PersistedListsCache
+    if (!data?.key || !Array.isArray(data.lists) || !data.viewerLogin) return
+    if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
+    listsCache.set(data.key, { value: { viewerLogin: data.viewerLogin, lists: data.lists }, expiresAt: data.expiresAt })
+  } catch {
+    // malformed or missing
+  }
+}
+
+function saveListsCacheToSettings(key: string, result: StarListsResult, expiresAt: number): void {
+  if (!_api || !_bgCtx) return
+  const payload: PersistedListsCache = {
+    key,
+    fetchedAt: Date.now(),
+    expiresAt,
+    viewerLogin: result.viewerLogin,
+    lists: result.lists
+  }
+  void _api.SaveSetting(_bgCtx, LISTS_SETTING_KEY, JSON.stringify(payload), false)
+}
+
+function getStarredCacheEntry(key: string): { repos: GitHubRepository[]; firstPageFresh: boolean; fullFresh: boolean } | null {
   const entry = starredCache.get(key)
   if (!entry) {
     return null
   }
 
+  const now = Date.now()
   return {
-    repos: entry.value,
-    fresh: entry.expiresAt >= Date.now()
+    repos: entry.repos,
+    firstPageFresh: now - entry.firstPageSyncedAt < STARRED_FIRST_PAGE_TTL_MS,
+    fullFresh: now - entry.fullSyncedAt < STARRED_FULL_SYNC_TTL_MS
   }
 }
 
@@ -548,6 +659,14 @@ export function matchesIssueSearch(issue: GitHubIssue, searchText: string): bool
   )
 }
 
+function hasRelNext(linkHeader: string | undefined): boolean | undefined {
+  if (!linkHeader) {
+    return undefined
+  }
+
+  return /rel="?next"?/i.test(linkHeader)
+}
+
 function normalizeStarredRepo(item: unknown): GitHubRepository {
   if (!item || typeof item !== "object") {
     throw new Error("Invalid starred repository payload")
@@ -561,40 +680,106 @@ function normalizeStarredRepo(item: unknown): GitHubRepository {
   return item as GitHubRepository
 }
 
-async function refreshStarredRepos(settings: PluginSettings, cacheKey: string): Promise<GitHubRepository[]> {
+function mergeStarredFirstPage(existing: GitHubRepository[], page1: GitHubRepository[]): GitHubRepository[] {
+  const page1Ids = new Set(page1.map(repo => repo.id))
+  return [...page1, ...existing.filter(repo => !page1Ids.has(repo.id))]
+}
+
+async function fetchStarredPage(client: Octokit, page: number): Promise<{ repos: GitHubRepository[]; link?: string }> {
+  const response = await client.activity.listReposStarredByAuthenticatedUser({
+    sort: "created",
+    direction: "desc",
+    per_page: STARRED_PER_PAGE,
+    page,
+    headers: {
+      accept: "application/vnd.github.star+json"
+    }
+  })
+
+  return {
+    repos: response.data.map(item => toCachedStarredRepo(normalizeStarredRepo(item))),
+    link: typeof response.headers.link === "string" ? response.headers.link : undefined
+  }
+}
+
+function logStarredSync(message: string): void {
+  if (_api && _bgCtx) {
+    void _api.Log(_bgCtx, "Info", message)
+  }
+}
+
+async function refreshStarredFirstPage(settings: PluginSettings, cacheKey: string): Promise<GitHubRepository[]> {
   const inFlight = starredRefreshInFlight.get(cacheKey)
   if (inFlight) {
-    return inFlight
+    return inFlight.promise
+  }
+
+  const request = (async () => {
+    const client = getClient(settings.personalAccessToken)
+    const { repos: page1 } = await fetchStarredPage(client, 1)
+    const now = Date.now()
+    if (page1.length === 0) {
+      logStarredSync("Starred first-page sync completed: 0 repos")
+      return setStarredCache(cacheKey, { repos: [], firstPageSyncedAt: now, fullSyncedAt: now })
+    }
+
+    const existing = starredCache.get(cacheKey)?.repos ?? []
+    const previous = starredCache.get(cacheKey)
+    const repos = mergeStarredFirstPage(existing, page1)
+    logStarredSync(`Starred first-page sync completed: ${page1.length} new page, ${repos.length} total`)
+    return setStarredCache(cacheKey, {
+      repos,
+      firstPageSyncedAt: now,
+      fullSyncedAt: previous?.fullSyncedAt ?? 0
+    })
+  })().finally(() => {
+    starredRefreshInFlight.delete(cacheKey)
+  })
+
+  starredRefreshInFlight.set(cacheKey, { kind: "page1", promise: request })
+  return request
+}
+
+async function refreshStarredRepos(settings: PluginSettings, cacheKey: string): Promise<GitHubRepository[]> {
+  const inFlight = starredRefreshInFlight.get(cacheKey)
+  if (inFlight?.kind === "full") {
+    return inFlight.promise
+  }
+  if (inFlight) {
+    await inFlight.promise
+    const latest = starredRefreshInFlight.get(cacheKey)
+    if (latest?.kind === "full") {
+      return latest.promise
+    }
   }
 
   const request = (async () => {
     const client = getClient(settings.personalAccessToken)
     const repos: GitHubRepository[] = []
+    let page = 1
 
-    for (let page = 1; page <= STARRED_MAX_PAGES; page++) {
-      const response = await client.activity.listReposStarredByAuthenticatedUser({
-        sort: "created",
-        direction: "desc",
-        per_page: STARRED_PER_PAGE,
-        page,
-        headers: {
-          accept: "application/vnd.github.star+json"
-        }
-      })
-      repos.push(...response.data.map(item => toCachedStarredRepo(normalizeStarredRepo(item))))
-      if (response.data.length < STARRED_PER_PAGE) {
+    while (true) {
+      const { repos: items, link } = await fetchStarredPage(client, page)
+      if (items.length === 0) {
         break
       }
+
+      repos.push(...items)
+      if (items.length < STARRED_PER_PAGE || hasRelNext(link) === false) {
+        break
+      }
+
+      page += 1
     }
 
-    const cached = setCached(starredCache, cacheKey, repos, STARRED_CACHE_TTL_MS)
-    saveStarredCacheToSettings(cacheKey, cached, Date.now() + STARRED_CACHE_TTL_MS)
-    return cached
+    const now = Date.now()
+    logStarredSync(`Starred full sync completed: ${repos.length} repos`)
+    return setStarredCache(cacheKey, { repos, firstPageSyncedAt: now, fullSyncedAt: now })
   })().finally(() => {
     starredRefreshInFlight.delete(cacheKey)
   })
 
-  starredRefreshInFlight.set(cacheKey, request)
+  starredRefreshInFlight.set(cacheKey, { kind: "full", promise: request })
   return request
 }
 
@@ -603,16 +788,21 @@ export async function listStarredRepos(settings: PluginSettings): Promise<GitHub
     token: settings.personalAccessToken
   })
   const cached = getStarredCacheEntry(cacheKey)
-  if (cached?.fresh) {
-    return cached.repos
+  if (!cached) {
+    return refreshStarredRepos(settings, cacheKey)
   }
 
-  if (cached) {
+  if (!cached.fullFresh) {
     void refreshStarredRepos(settings, cacheKey)
     return cached.repos
   }
 
-  return refreshStarredRepos(settings, cacheKey)
+  if (!cached.firstPageFresh) {
+    void refreshStarredFirstPage(settings, cacheKey)
+    return cached.repos
+  }
+
+  return cached.repos
 }
 
 export function compareStarredRepos(left: GitHubRepository, right: GitHubRepository, sort: StarredSort): number {
@@ -623,6 +813,183 @@ export function compareStarredRepos(left: GitHubRepository, right: GitHubReposit
     default:
       return new Date(right.starred_at || 0).getTime() - new Date(left.starred_at || 0).getTime()
   }
+}
+
+function toUserList(node: GraphQLUserListNode): GitHubUserList {
+  return {
+    id: node.id,
+    name: node.name,
+    description: node.description || null,
+    slug: node.slug,
+    isPrivate: Boolean(node.isPrivate),
+    itemsCount: node.items?.totalCount ?? 0
+  }
+}
+
+function toRepositoryFromListItem(node: GraphQLRepositoryNode): GitHubRepository {
+  return {
+    id: node.databaseId ?? 0,
+    name: node.name,
+    full_name: node.nameWithOwner,
+    description: node.description || null,
+    language: node.primaryLanguage?.name || null,
+    stargazers_count: node.stargazerCount,
+    html_url: node.url,
+    owner: node.owner
+      ? {
+          login: node.owner.login,
+          avatar_url: node.owner.avatarUrl || ""
+        }
+      : null
+  } as GitHubRepository
+}
+
+async function refreshUserLists(settings: PluginSettings, cacheKey: string): Promise<StarListsResult> {
+  const inFlight = listsRefreshInFlight.get(cacheKey)
+  if (inFlight) {
+    return inFlight
+  }
+
+  const request = (async () => {
+    const client = getClient(settings.personalAccessToken)
+    const lists: GitHubUserList[] = []
+    let viewerLogin = ""
+    let cursor: string | null = null
+
+    while (true) {
+      const variables: { cursor?: string } = cursor ? { cursor } : {}
+      const data = (await client.graphql(
+        `query StarLists($cursor: String) {
+          viewer {
+            login
+            lists(first: 100, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes { id name description slug isPrivate items { totalCount } }
+            }
+          }
+        }`,
+        variables
+      )) as StarListsQuery
+
+      viewerLogin = data.viewer?.login || viewerLogin
+      const connection = data.viewer?.lists
+      for (const node of connection?.nodes || []) {
+        if (node) {
+          lists.push(toUserList(node))
+        }
+      }
+
+      if (!connection?.pageInfo?.hasNextPage || !connection.pageInfo.endCursor) {
+        break
+      }
+      cursor = connection.pageInfo.endCursor
+    }
+
+    const result = { viewerLogin, lists }
+    setCached(listsCache, cacheKey, result, LISTS_CACHE_TTL_MS)
+    saveListsCacheToSettings(cacheKey, result, Date.now() + LISTS_CACHE_TTL_MS)
+    return result
+  })().finally(() => {
+    listsRefreshInFlight.delete(cacheKey)
+  })
+
+  listsRefreshInFlight.set(cacheKey, request)
+  return request
+}
+
+export async function listUserLists(settings: PluginSettings): Promise<StarListsResult> {
+  const cacheKey = JSON.stringify({
+    token: settings.personalAccessToken
+  })
+  const entry = listsCache.get(cacheKey)
+  if (entry) {
+    if (entry.expiresAt < Date.now()) {
+      void refreshUserLists(settings, cacheKey)
+    }
+    return entry.value
+  }
+
+  return refreshUserLists(settings, cacheKey)
+}
+
+async function refreshUserListItems(settings: PluginSettings, listId: string): Promise<GitHubRepository[]> {
+  const cacheKey = JSON.stringify({
+    token: settings.personalAccessToken,
+    listId
+  })
+  const inFlight = listItemsRefreshInFlight.get(cacheKey)
+  if (inFlight) {
+    return inFlight
+  }
+
+  const request = (async () => {
+    const client = getClient(settings.personalAccessToken)
+    const repos: GitHubRepository[] = []
+    let cursor: string | null = null
+
+    while (true) {
+      const variables: { listId: string; cursor?: string } = cursor ? { listId, cursor } : { listId }
+      const data = (await client.graphql(
+        `query StarListItems($listId: ID!, $cursor: String) {
+          node(id: $listId) {
+            ... on UserList {
+              items(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes {
+                  ... on Repository {
+                    databaseId
+                    name
+                    nameWithOwner
+                    description
+                    url
+                    stargazerCount
+                    primaryLanguage { name }
+                    owner { login avatarUrl }
+                  }
+                }
+              }
+            }
+          }
+        }`,
+        variables
+      )) as StarListItemsQuery
+
+      const connection = data.node?.items
+      for (const node of connection?.nodes || []) {
+        if (node?.nameWithOwner && node.url) {
+          repos.push(toRepositoryFromListItem(node))
+        }
+      }
+
+      if (!connection?.pageInfo?.hasNextPage || !connection.pageInfo.endCursor) {
+        break
+      }
+      cursor = connection.pageInfo.endCursor
+    }
+
+    return setCached(listItemsCache, cacheKey, repos, LISTS_ITEMS_CACHE_TTL_MS)
+  })().finally(() => {
+    listItemsRefreshInFlight.delete(cacheKey)
+  })
+
+  listItemsRefreshInFlight.set(cacheKey, request)
+  return request
+}
+
+export async function listUserListItems(settings: PluginSettings, listId: string): Promise<GitHubRepository[]> {
+  const cacheKey = JSON.stringify({
+    token: settings.personalAccessToken,
+    listId
+  })
+  const entry = listItemsCache.get(cacheKey)
+  if (entry) {
+    if (entry.expiresAt < Date.now()) {
+      void refreshUserListItems(settings, listId)
+    }
+    return entry.value
+  }
+
+  return refreshUserListItems(settings, listId)
 }
 
 export function matchesRepositorySearch(repository: GitHubRepository, searchText: string): boolean {
@@ -668,6 +1035,16 @@ export function invalidateStarredCaches(): void {
   starredRefreshInFlight.clear()
   if (_api && _bgCtx) {
     void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, "", false)
+  }
+}
+
+export function invalidateUserListCaches(): void {
+  listsCache.clear()
+  listItemsCache.clear()
+  listsRefreshInFlight.clear()
+  listItemsRefreshInFlight.clear()
+  if (_api && _bgCtx) {
+    void _api.SaveSetting(_bgCtx, LISTS_SETTING_KEY, "", false)
   }
 }
 

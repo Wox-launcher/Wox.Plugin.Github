@@ -2,9 +2,7 @@
 
 Wox plugin for GitHub issue and notification management
 
-
 ![](./screenshot.jpg)
-
 
 ## Install
 

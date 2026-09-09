@@ -3,6 +3,7 @@ import { QueryHint } from "@wox-launcher/wox-plugin"
 import { IssueRef, ParsedPluginQuery, QueryMode } from "./types"
 
 export const ISSUE_HINT_ID = "issue"
+export const LIST_HINT_ID = "list"
 
 const COMMAND_ALIASES: Record<string, QueryMode> = {
   issue: "issues",
@@ -11,7 +12,9 @@ const COMMAND_ALIASES: Record<string, QueryMode> = {
   notifications: "notifications",
   star: "starred",
   stars: "starred",
-  starred: "starred"
+  starred: "starred",
+  list: "lists",
+  lists: "lists"
 }
 
 const ISSUE_REF_PATTERN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/
@@ -33,6 +36,30 @@ export function buildIssueDetailQuery(triggerKeyword: string, repository: string
       ]
     }
   }
+}
+
+export function buildListDetailQuery(triggerKeyword: string, listName: string): { QueryText: string; QueryHint: QueryHint } {
+  const trigger = triggerKeyword.trim() || "gh"
+  const commandPrefix = `${trigger} lists `
+  return {
+    QueryText: `${commandPrefix}${listName}`,
+    QueryHint: {
+      Elements: [
+        { Id: "command", Kind: "text", Text: commandPrefix },
+        { Id: LIST_HINT_ID, Kind: "block", Value: listName }
+      ]
+    }
+  }
+}
+
+export function parseListNameFromHint(hint?: QueryHint): string | undefined {
+  const list = hint?.Elements.find(element => element.Id === LIST_HINT_ID && element.Kind === "block")
+  if (!list || list.Kind !== "block") {
+    return undefined
+  }
+
+  const value = list.Value.trim()
+  return value || undefined
 }
 
 export function parseIssueRefFromHint(hint?: QueryHint): IssueRef | undefined {
@@ -66,6 +93,15 @@ function withIssueRef(parsed: ParsedPluginQuery, hint?: QueryHint): ParsedPlugin
   return issueRef ? { ...parsed, issueRef } : parsed
 }
 
+function withListName(parsed: ParsedPluginQuery, hint?: QueryHint): ParsedPluginQuery {
+  if (parsed.mode !== "lists") {
+    return parsed
+  }
+
+  const listName = parseListNameFromHint(hint)
+  return listName ? { ...parsed, listName } : parsed
+}
+
 export function parsePluginQuery(command: string | undefined, search: string, hint?: QueryHint): ParsedPluginQuery {
   const normalizedCommand = (command || "").trim().toLowerCase()
   const normalizedSearch = normalizeSearch(search)
@@ -76,6 +112,10 @@ export function parsePluginQuery(command: string | undefined, search: string, hi
 
   if (normalizedCommand === "starred") {
     return { mode: "starred", search: normalizedSearch, unreadOnly: false }
+  }
+
+  if (normalizedCommand === "lists") {
+    return withListName({ mode: "lists", search: normalizedSearch, unreadOnly: false }, hint)
   }
 
   if (normalizedCommand === "notifications") {
@@ -108,7 +148,7 @@ export function parsePluginQuery(command: string | undefined, search: string, hi
         return { mode, search: "", unreadOnly: true }
       }
 
-      return withIssueRef({ mode, search: rest, unreadOnly: false }, hint)
+      return withListName(withIssueRef({ mode, search: rest, unreadOnly: false }, hint), hint)
     }
   }
 

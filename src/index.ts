@@ -35,8 +35,11 @@ import {
   invalidateIssueCaches,
   invalidateNotificationCaches,
   invalidateStarredCaches,
+  invalidateUserListCaches,
   listNotifications,
   listStarredRepos,
+  listUserListItems,
+  listUserLists,
   markAllNotificationsAsRead,
   markNotificationAsDone,
   markNotificationAsRead,
@@ -80,17 +83,21 @@ import {
   IconPullRequestMerged,
   IconPullRequestOpen,
   IconRepositoryTag,
+  IconList,
   IconStar
 } from "./icons"
-import { buildIssueDetailQuery, parsePluginQuery } from "./query"
+import { matchesUserListSearch, resolveUserListQuery, userListUrl } from "./list-query"
+import { buildIssueDetailQuery, buildListDetailQuery, parsePluginQuery } from "./query"
 import { getSettings } from "./settings"
-import { GitHubIssue, GitHubNotification, GitHubRepository, IssueRef, IssueSort, ParsedPluginQuery, PluginSettings, StarredSort } from "./types"
+import { GitHubIssue, GitHubNotification, GitHubRepository, GitHubUserList, IssueRef, IssueSort, ParsedPluginQuery, PluginSettings, StarredSort } from "./types"
 
 let api: PublicAPI
 
 // Background polling state
 let pollInterval: ReturnType<typeof setInterval> | null = null
+let starredSyncInterval: ReturnType<typeof setInterval> | null = null
 const BG_POLL_INTERVAL_MS = 2 * 60 * 1000
+const STARRED_SYNC_INTERVAL_MS = 5 * 60 * 1000
 
 const ICON: WoxImage = {
   ImageType: "relative",
@@ -395,6 +402,13 @@ async function buildHomeResults(ctx: Context, query: Query, parsed: ParsedPlugin
       SubTitle: await t(ctx, "home_starred_subtitle"),
       Icon: IconStar,
       Actions: [changeQueryAction(buildCommandQuery(query, "starred"), await t(ctx, "action_open_starred"), IconStar, true)]
+    },
+    {
+      Id: makeResultId(),
+      Title: await t(ctx, "home_lists_title"),
+      SubTitle: await t(ctx, "home_lists_subtitle"),
+      Icon: IconList,
+      Actions: [changeQueryAction(buildCommandQuery(query, "lists"), await t(ctx, "action_open_lists"), IconList, true)]
     }
   ]
 
@@ -800,13 +814,13 @@ function starredRepoScore(repository: GitHubRepository, sort: StarredSort): numb
   return repository.starred_at ? toScore(repository.starred_at) : 0
 }
 
-async function buildStarredRepoResult(ctx: Context, repository: GitHubRepository, sort: StarredSort): Promise<Result> {
+async function buildStarredRepoResult(ctx: Context, repository: GitHubRepository, sort: StarredSort, score?: number): Promise<Result> {
   return {
     Id: makeResultId(),
     Title: repository.full_name,
     SubTitle: repository.description || (await t(ctx, "issue_no_description")),
     Icon: repositoryIcon(repository),
-    Score: starredRepoScore(repository, sort),
+    Score: score ?? starredRepoScore(repository, sort),
     Tails: await buildStarredRepoTails(ctx, repository),
     Actions: [
       {
@@ -840,9 +854,128 @@ async function buildStarredRepoResult(ctx: Context, repository: GitHubRepository
 
 const REFINEMENT_STARRED_SORT_ID = "starred_sort"
 const DEFAULT_STARRED_SORT: StarredSort = "starred-desc"
+const REFINEMENT_LIST_SORT_ID = "list_sort"
+const DEFAULT_LIST_SORT: ListItemSort = "list-order"
+
+type ListItemSort = "list-order" | "stars-desc"
 
 function parseStarredSort(value: string | undefined): StarredSort {
   return value === "stars-desc" ? "stars-desc" : DEFAULT_STARRED_SORT
+}
+
+function parseListItemSort(value: string | undefined): ListItemSort {
+  return value === "stars-desc" ? "stars-desc" : DEFAULT_LIST_SORT
+}
+
+async function listItemSortRefinements(ctx: Context): Promise<QueryRefinement[]> {
+  return [
+    {
+      Id: REFINEMENT_LIST_SORT_ID,
+      Title: await t(ctx, "refinement_sort_label"),
+      Type: "sort",
+      DefaultValue: [DEFAULT_LIST_SORT],
+      Hotkey: primaryHotkey("o"),
+      Options: [
+        { Value: "list-order", Title: await t(ctx, "sort_list_order") },
+        { Value: "stars-desc", Title: await t(ctx, "sort_stars_desc") }
+      ]
+    }
+  ]
+}
+
+async function buildUserListTails(ctx: Context, list: GitHubUserList): Promise<ResultTail[]> {
+  const tails: ResultTail[] = [
+    {
+      Type: "text",
+      Text: String(list.itemsCount),
+      Tooltip: await tf(ctx, "list_repos_tooltip", list.itemsCount)
+    }
+  ]
+  if (list.isPrivate) {
+    tails.push({ Type: "text", Text: await t(ctx, "list_private_label") })
+  }
+  return tails
+}
+
+async function buildUserListResult(ctx: Context, query: Query, viewerLogin: string, list: GitHubUserList): Promise<Result> {
+  const detailQuery = buildListDetailQuery(query.TriggerKeyword || "gh", list.name)
+  const url = userListUrl(viewerLogin, list)
+  return {
+    Id: makeResultId(),
+    Title: list.name,
+    SubTitle: list.description || (await tf(ctx, "list_default_subtitle", list.itemsCount)),
+    Icon: IconList,
+    Score: list.itemsCount,
+    Tails: await buildUserListTails(ctx, list),
+    Actions: [
+      {
+        Id: makeScopedActionId(list.id, "browse-list"),
+        Name: await t(ctx, "action_browse_list"),
+        Icon: IconList,
+        IsDefault: true,
+        PreventHideAfterAction: true,
+        Action: async actionCtx => {
+          await api.ChangeQuery(actionCtx, {
+            QueryType: "input",
+            ...detailQuery
+          })
+        }
+      },
+      {
+        Id: makeScopedActionId(list.id, "open-list"),
+        Name: await t(ctx, "action_open_in_browser"),
+        Icon: IconActionOpenExternal,
+        ContextData: { url },
+        Action: async (_ctx, actionCtx) => {
+          await openExternalUrl(actionCtx.ContextData.url || url)
+        }
+      }
+    ]
+  }
+}
+
+async function queryLists(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<QueryResponse> {
+  const { viewerLogin, lists } = await listUserLists(settings)
+  const resolved = resolveUserListQuery(lists, parsed.search, parsed.listName)
+
+  if (resolved.list) {
+    const selectedSort = parseListItemSort(query.Refinements?.[REFINEMENT_LIST_SORT_ID])
+    const repos = (await listUserListItems(settings, resolved.list.id)).filter(repo => matchesRepositorySearch(repo, resolved.repoSearch))
+    if (selectedSort === "stars-desc") {
+      repos.sort((left, right) => right.stargazers_count - left.stargazers_count)
+    }
+    const results = await Promise.all(repos.map((repo, index) => buildStarredRepoResult(ctx, repo, "stars-desc", selectedSort === "stars-desc" ? repo.stargazers_count : 10000 - index)))
+    return {
+      Results:
+        results.length > 0
+          ? results
+          : [
+              {
+                Id: makeResultId(),
+                Title: await t(ctx, "empty_list_items_title"),
+                SubTitle: resolved.repoSearch ? await tf(ctx, "empty_list_items_with_search", resolved.repoSearch) : await tf(ctx, "empty_list_items_default", resolved.list.name),
+                Icon: IconList
+              }
+            ],
+      Refinements: await listItemSortRefinements(ctx)
+    }
+  }
+
+  const filtered = lists.filter(list => matchesUserListSearch(list, resolved.listSearch)).sort((left, right) => right.itemsCount - left.itemsCount)
+  const results = await Promise.all(filtered.map(list => buildUserListResult(ctx, query, viewerLogin, list)))
+  return {
+    Results:
+      results.length > 0
+        ? results
+        : [
+            {
+              Id: makeResultId(),
+              Title: await t(ctx, "empty_lists_title"),
+              SubTitle: parsed.search ? await tf(ctx, "empty_lists_with_search", parsed.search) : await t(ctx, "empty_lists_default"),
+              Icon: IconList
+            }
+          ]
+  }
 }
 
 async function queryStarred(ctx: Context, query: Query, settings: PluginSettings, parsed: ParsedPluginQuery): Promise<QueryResponse> {
@@ -1115,6 +1248,17 @@ async function queryNotifications(ctx: Context, query: Query, settings: PluginSe
   }
 }
 
+async function prefetchUserLists(): Promise<void> {
+  const ctx = NewContext()
+  try {
+    const settings = await getSettings(ctx, api)
+    if (!settings.personalAccessToken) return
+    await listUserLists(settings)
+  } catch (error) {
+    void api.Log(ctx, "Error", `Lists prefetch failed: ${getErrorMessage(error)}`)
+  }
+}
+
 async function prefetchStarredRepos(): Promise<void> {
   const ctx = NewContext()
   try {
@@ -1170,6 +1314,9 @@ export const plugin: Plugin = {
       }
       if (key === "personalAccessToken") {
         invalidateStarredCaches()
+        invalidateUserListCaches()
+        void prefetchStarredRepos()
+        void prefetchUserLists()
       }
     })
 
@@ -1178,14 +1325,22 @@ export const plugin: Plugin = {
         clearInterval(pollInterval)
         pollInterval = null
       }
+      if (starredSyncInterval !== null) {
+        clearInterval(starredSyncInterval)
+        starredSyncInterval = null
+      }
     })
 
     // Initial seed (no attention pushes), then poll every 2 minutes
     void pollInBackground()
     void prefetchStarredRepos()
+    void prefetchUserLists()
     pollInterval = setInterval(() => {
       void pollInBackground()
     }, BG_POLL_INTERVAL_MS)
+    starredSyncInterval = setInterval(() => {
+      void prefetchStarredRepos()
+    }, STARRED_SYNC_INTERVAL_MS)
 
     await api.Log(ctx, "Info", "GitHub plugin initialized")
   },
@@ -1207,6 +1362,8 @@ export const plugin: Plugin = {
           return await queryNotifications(ctx, query, settings, parsed)
         case "starred":
           return await queryStarred(ctx, query, settings, parsed)
+        case "lists":
+          return await queryLists(ctx, query, settings, parsed)
         case "home":
         default:
           return { Results: await buildHomeResults(ctx, query, parsed) }
