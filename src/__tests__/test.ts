@@ -118,6 +118,45 @@ describe("parsePluginQuery", () => {
       unreadOnly: true
     })
   })
+
+  test("parses issues created and assigned shortcuts from search text", () => {
+    expect(parsePluginQuery("issues", "created")).toEqual({
+      mode: "issues",
+      search: "",
+      unreadOnly: false,
+      issueGroup: "Created"
+    })
+    expect(parsePluginQuery("issues", "assigned bug")).toEqual({
+      mode: "issues",
+      search: "bug",
+      unreadOnly: false,
+      issueGroup: "Assigned"
+    })
+    expect(parsePluginQuery(undefined, "issues created wox")).toEqual({
+      mode: "issues",
+      search: "wox",
+      unreadOnly: false,
+      issueGroup: "Created"
+    })
+  })
+
+  test("keeps other issue keywords as issue search text", () => {
+    expect(parsePluginQuery("issues", "createdby")).toEqual({
+      mode: "issues",
+      search: "createdby",
+      unreadOnly: false
+    })
+    expect(parsePluginQuery("issues", "myraxion/wox.plugin.linkding#6")).toEqual({
+      mode: "issues",
+      search: "myraxion/wox.plugin.linkding#6",
+      unreadOnly: false,
+      issueRef: {
+        owner: "myraxion",
+        repo: "wox.plugin.linkding",
+        number: 6
+      }
+    })
+  })
 })
 
 describe("parseRepositoryList", () => {

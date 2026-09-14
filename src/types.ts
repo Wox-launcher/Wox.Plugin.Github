@@ -20,6 +20,8 @@ export type StarredSort = "starred-desc" | "stars-desc"
 
 export type QueryMode = "home" | "issues" | "notifications" | "starred" | "lists"
 
+export type IssueGroupFilter = "Created" | "Assigned"
+
 export interface GitHubUserList {
   id: string
   name: string
@@ -63,5 +65,6 @@ export interface ParsedPluginQuery {
   search: string
   unreadOnly: boolean
   issueRef?: IssueRef
+  issueGroup?: IssueGroupFilter
   listName?: string
 }

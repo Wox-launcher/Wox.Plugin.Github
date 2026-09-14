@@ -1086,6 +1086,28 @@ async function queryIssues(ctx: Context, query: Query, settings: PluginSettings,
     sections = sections.filter(s => s.group === "Recently Closed")
   }
 
+  if (parsed.issueGroup) {
+    const issueGroup = parsed.issueGroup
+    const viewerLogin = issueData.viewerLogin.toLowerCase()
+    sections = sections
+      .filter(section => section.group === issueGroup || section.group === "Recently Closed")
+      .map(section => {
+        if (section.group !== "Recently Closed") {
+          return section
+        }
+
+        const issues = section.issues.filter(issue => {
+          if (issueGroup === "Created") {
+            return (issue.user?.login || "").toLowerCase() === viewerLogin
+          }
+
+          return getIssueAssigneeLogins(issue).some(login => login.toLowerCase() === viewerLogin)
+        })
+        return { ...section, issues }
+      })
+      .filter(section => section.issues.length > 0)
+  }
+
   // Re-sort in memory if refinement differs from cached sort
   if (selectedSort !== settings.issueSort) {
     sections = sections.map(s => ({ ...s, issues: [...s.issues].sort((a, b) => compareIssues(a, b, selectedSort)) }))

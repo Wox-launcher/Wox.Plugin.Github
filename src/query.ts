@@ -1,6 +1,6 @@
 import { QueryHint } from "@wox-launcher/wox-plugin"
 
-import { IssueRef, ParsedPluginQuery, QueryMode } from "./types"
+import { IssueGroupFilter, IssueRef, ParsedPluginQuery, QueryMode } from "./types"
 
 export const ISSUE_HINT_ID = "issue"
 export const LIST_HINT_ID = "list"
@@ -18,6 +18,11 @@ const COMMAND_ALIASES: Record<string, QueryMode> = {
 }
 
 const ISSUE_REF_PATTERN = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/
+
+const ISSUE_GROUP_ALIASES: Record<string, IssueGroupFilter> = {
+  created: "Created",
+  assigned: "Assigned"
+}
 
 function normalizeSearch(input: string): string {
   return input.trim().replace(/\s+/g, " ")
@@ -93,6 +98,25 @@ function withIssueRef(parsed: ParsedPluginQuery, hint?: QueryHint): ParsedPlugin
   return issueRef ? { ...parsed, issueRef } : parsed
 }
 
+function withIssueGroup(parsed: ParsedPluginQuery): ParsedPluginQuery {
+  if (parsed.mode !== "issues" || parsed.issueRef) {
+    return parsed
+  }
+
+  const firstSpace = parsed.search.indexOf(" ")
+  const firstToken = (firstSpace === -1 ? parsed.search : parsed.search.slice(0, firstSpace)).toLowerCase()
+  const issueGroup = ISSUE_GROUP_ALIASES[firstToken]
+  if (!issueGroup) {
+    return parsed
+  }
+
+  return {
+    ...parsed,
+    issueGroup,
+    search: firstSpace === -1 ? "" : normalizeSearch(parsed.search.slice(firstSpace + 1))
+  }
+}
+
 function withListName(parsed: ParsedPluginQuery, hint?: QueryHint): ParsedPluginQuery {
   if (parsed.mode !== "lists") {
     return parsed
@@ -107,7 +131,7 @@ export function parsePluginQuery(command: string | undefined, search: string, hi
   const normalizedSearch = normalizeSearch(search)
 
   if (normalizedCommand === "issues") {
-    return withIssueRef({ mode: "issues", search: normalizedSearch, unreadOnly: false }, hint)
+    return withIssueGroup(withIssueRef({ mode: "issues", search: normalizedSearch, unreadOnly: false }, hint))
   }
 
   if (normalizedCommand === "starred") {
@@ -148,7 +172,7 @@ export function parsePluginQuery(command: string | undefined, search: string, hi
         return { mode, search: "", unreadOnly: true }
       }
 
-      return withListName(withIssueRef({ mode, search: rest, unreadOnly: false }, hint), hint)
+      return withIssueGroup(withListName(withIssueRef({ mode, search: rest, unreadOnly: false }, hint), hint))
     }
   }
 

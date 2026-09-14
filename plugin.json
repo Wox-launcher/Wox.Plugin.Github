@@ -4,7 +4,7 @@
   "Name": "i18n:plugin_name",
   "Description": "i18n:plugin_description",
   "Author": "qianlifeng",
-  "Version": "0.1.1",
+  "Version": "0.1.2",
   "MinWoxVersion": "2.4.2",
   "Runtime": "nodejs",
   "Website": "https://github.com/qianlifeng/Wox.Plugin.Github",
@@ -20,8 +20,8 @@
         "Elements": [
           {
             "Id": "issue",
-            "Kind": "block",
-            "Value": ""
+            "Kind": "argument",
+            "Placeholder": "i18n:issue_query_placeholder"
           }
         ]
       }
@@ -229,7 +229,8 @@
     "en_US": {
       "plugin_name": "GitHub",
       "plugin_description": "Manage GitHub issues and notifications",
-      "command_issues_description": "List your GitHub issues",
+      "command_issues_description": "List your GitHub issues. Use created or assigned to filter by group",
+      "issue_query_placeholder": "created / assigned / search",
       "command_notifications_description": "Manage GitHub notifications",
       "command_starred_description": "List repositories you have starred",
       "command_lists_description": "Browse your GitHub star lists",
@@ -417,7 +418,8 @@
     "zh_CN": {
       "plugin_name": "GitHub",
       "plugin_description": "管理 GitHub 的 issues 和通知",
-      "command_issues_description": "查看你的 GitHub issues",
+      "command_issues_description": "查看你的 GitHub issues。输入 created 或 assigned 可单独筛选",
+      "issue_query_placeholder": "created / assigned / 搜索",
       "command_notifications_description": "管理 GitHub 通知",
       "command_starred_description": "查看你 Star 的仓库",
       "command_lists_description": "查看你的 GitHub Star Lists",
