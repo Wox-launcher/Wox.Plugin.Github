@@ -44,7 +44,6 @@ const subjectStateCache = new Map<string, CacheEntry<string>>()
 const STATE_CACHE_FILE = "subject-state.json"
 const STARRED_CACHE_FILE = "starred-repos.json"
 const LISTS_CACHE_FILE = "star-lists.json"
-const LEGACY_CACHE_SETTING_KEYS = ["_subjectStateCache", "_subjectStateCacheV2", "_starredReposCache", "_starredReposCacheV2", "_starListsCache"]
 
 let _bgCtx: Context | null = null
 let _api: PublicAPI | null = null
@@ -140,7 +139,6 @@ export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   await loadStateCache()
   await loadStarredCache()
   await loadListsCache()
-  await clearLegacyCacheSettings()
 }
 
 function chainCacheWrite(queue: Promise<void>, task: () => Promise<void>): Promise<void> {
@@ -228,19 +226,6 @@ async function loadStarredCache(): Promise<void> {
 
 async function loadListsCache(): Promise<void> {
   await loadCacheFile(LISTS_CACHE_FILE, applyListsCache)
-}
-
-async function clearLegacyCacheSettings(): Promise<void> {
-  if (!_api || !_bgCtx) return
-  for (const key of LEGACY_CACHE_SETTING_KEYS) {
-    try {
-      const raw = await _api.GetSetting(_bgCtx, key)
-      if (!raw) continue
-      await _api.SaveSetting(_bgCtx, key, "", false)
-    } catch {
-      // leave the key if it cannot be cleared
-    }
-  }
 }
 
 function toCachedStarredRepo(repo: GitHubRepository): GitHubRepository {
