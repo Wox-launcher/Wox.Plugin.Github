@@ -1,3 +1,6 @@
+import { mkdir, readFile, rename, rm, writeFile } from "fs/promises"
+import { join } from "path"
+
 import { Context, PublicAPI } from "@wox-launcher/wox-plugin"
 import { Octokit } from "@octokit/rest"
 
@@ -36,16 +39,19 @@ const listsCache = new Map<string, CacheEntry<StarListsResult>>()
 const listItemsCache = new Map<string, CacheEntry<GitHubRepository[]>>()
 const subjectStateCache = new Map<string, CacheEntry<string>>()
 
-// ---------------------------------------------------------------------------
-// Subject state persistence via Wox SDK SaveSetting/GetSetting
-// ---------------------------------------------------------------------------
-
-const STATE_SETTING_KEY = "_subjectStateCacheV2"
-const STARRED_SETTING_KEY = "_starredReposCacheV2"
-const LISTS_SETTING_KEY = "_starListsCache"
+// Machine-local cache files under GetCacheFolder. These must not use settings:
+// SaveSetting values are eligible for Wox cloud sync.
+const STATE_CACHE_FILE = "subject-state.json"
+const STARRED_CACHE_FILE = "starred-repos.json"
+const LISTS_CACHE_FILE = "star-lists.json"
+const LEGACY_CACHE_SETTING_KEYS = ["_subjectStateCache", "_subjectStateCacheV2", "_starredReposCache", "_starredReposCacheV2", "_starListsCache"]
 
 let _bgCtx: Context | null = null
 let _api: PublicAPI | null = null
+let cacheDir: string | null = null
+let statePersistQueue: Promise<void> = Promise.resolve()
+let starredPersistQueue: Promise<void> = Promise.resolve()
+let listsPersistQueue: Promise<void> = Promise.resolve()
 
 type PersistedStateEntry = { state: string; expiresAt: number }
 
@@ -121,32 +127,120 @@ const listItemsRefreshInFlight = new Map<string, Promise<GitHubRepository[]>>()
 export async function initGithub(ctx: Context, api: PublicAPI): Promise<void> {
   _bgCtx = ctx
   _api = api
+  cacheDir = null
   try {
-    const raw = await api.GetSetting(ctx, STATE_SETTING_KEY)
-    if (raw) {
-      const data = JSON.parse(raw) as Record<string, PersistedStateEntry>
-      const now = Date.now()
-      for (const [url, entry] of Object.entries(data)) {
-        if (entry.expiresAt > now) {
-          subjectStateCache.set(url, { value: entry.state, expiresAt: entry.expiresAt })
-        }
-      }
+    if (typeof api.GetCacheFolder === "function") {
+      const folder = (await api.GetCacheFolder(ctx)).trim()
+      cacheDir = folder || null
     }
   } catch {
-    // malformed or missing – start with empty cache
+    cacheDir = null
   }
 
-  await loadStarredCacheFromSettings()
-  await loadListsCacheFromSettings()
+  await loadStateCache()
+  await loadStarredCache()
+  await loadListsCache()
+  await clearLegacyCacheSettings()
 }
 
-function saveStateCacheToSettings(): void {
-  if (!_api || !_bgCtx) return
+function chainCacheWrite(queue: Promise<void>, task: () => Promise<void>): Promise<void> {
+  return queue.then(task).then(
+    () => undefined,
+    () => undefined
+  )
+}
+
+async function readCacheFile(name: string): Promise<string | null> {
+  if (!cacheDir) return null
+  try {
+    return await readFile(join(cacheDir, name), "utf8")
+  } catch {
+    return null
+  }
+}
+
+async function writeCacheFile(name: string, contents: string): Promise<void> {
+  if (!cacheDir) return
+  const path = join(cacheDir, name)
+  const tmp = join(cacheDir, `${name}.tmp`)
+  await mkdir(cacheDir, { recursive: true })
+  await writeFile(tmp, contents, "utf8")
+  try {
+    await rm(path, { force: true })
+    await rename(tmp, path)
+  } catch (error) {
+    await rm(tmp, { force: true })
+    throw error
+  }
+}
+
+async function deleteCacheFile(name: string): Promise<void> {
+  if (!cacheDir) return
+  await rm(join(cacheDir, name), { force: true })
+}
+
+function applyStateCache(raw: string): void {
+  const data = JSON.parse(raw) as Record<string, PersistedStateEntry>
+  if (!data || typeof data !== "object" || Array.isArray(data)) return
+  const now = Date.now()
+  for (const [url, entry] of Object.entries(data)) {
+    if (entry?.expiresAt > now && typeof entry.state === "string") {
+      subjectStateCache.set(url, { value: entry.state, expiresAt: entry.expiresAt })
+    }
+  }
+}
+
+function snapshotStateCache(): Record<string, PersistedStateEntry> {
+  const now = Date.now()
   const data: Record<string, PersistedStateEntry> = {}
   for (const [url, entry] of Array.from(subjectStateCache.entries())) {
+    if (entry.expiresAt <= now) {
+      subjectStateCache.delete(url)
+      continue
+    }
     data[url] = { state: entry.value, expiresAt: entry.expiresAt }
   }
-  void _api.SaveSetting(_bgCtx, STATE_SETTING_KEY, JSON.stringify(data), false)
+  return data
+}
+
+function saveStateCacheToDisk(): void {
+  const json = JSON.stringify(snapshotStateCache())
+  statePersistQueue = chainCacheWrite(statePersistQueue, () => writeCacheFile(STATE_CACHE_FILE, json))
+}
+
+async function loadCacheFile(name: string, apply: (raw: string) => void): Promise<void> {
+  const raw = await readCacheFile(name)
+  if (!raw) return
+  try {
+    apply(raw)
+  } catch {
+    // malformed – the next refresh overwrites it
+  }
+}
+
+async function loadStateCache(): Promise<void> {
+  await loadCacheFile(STATE_CACHE_FILE, applyStateCache)
+}
+
+async function loadStarredCache(): Promise<void> {
+  await loadCacheFile(STARRED_CACHE_FILE, applyStarredCache)
+}
+
+async function loadListsCache(): Promise<void> {
+  await loadCacheFile(LISTS_CACHE_FILE, applyListsCache)
+}
+
+async function clearLegacyCacheSettings(): Promise<void> {
+  if (!_api || !_bgCtx) return
+  for (const key of LEGACY_CACHE_SETTING_KEYS) {
+    try {
+      const raw = await _api.GetSetting(_bgCtx, key)
+      if (!raw) continue
+      await _api.SaveSetting(_bgCtx, key, "", false)
+    } catch {
+      // leave the key if it cannot be cleared
+    }
+  }
 }
 
 function toCachedStarredRepo(repo: GitHubRepository): GitHubRepository {
@@ -168,26 +262,18 @@ function toCachedStarredRepo(repo: GitHubRepository): GitHubRepository {
   } as GitHubRepository
 }
 
-async function loadStarredCacheFromSettings(): Promise<void> {
-  if (!_api || !_bgCtx) return
-  try {
-    const raw = await _api.GetSetting(_bgCtx, STARRED_SETTING_KEY)
-    if (!raw) return
-    const data = JSON.parse(raw) as PersistedStarredCache
-    if (!data?.key || !Array.isArray(data.repos)) return
-    if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
-    starredCache.set(data.key, {
-      repos: data.repos,
-      firstPageSyncedAt: data.firstPageSyncedAt ?? data.fetchedAt,
-      fullSyncedAt: data.fullSyncedAt ?? 0
-    })
-  } catch {
-    // malformed or missing
-  }
+function applyStarredCache(raw: string): void {
+  const data = JSON.parse(raw) as PersistedStarredCache
+  if (!data?.key || !Array.isArray(data.repos)) return
+  if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
+  starredCache.set(data.key, {
+    repos: data.repos,
+    firstPageSyncedAt: data.firstPageSyncedAt ?? data.fetchedAt,
+    fullSyncedAt: data.fullSyncedAt ?? 0
+  })
 }
 
-function saveStarredCacheToSettings(key: string, record: StarredCacheRecord): void {
-  if (!_api || !_bgCtx) return
+function saveStarredCacheToDisk(key: string, record: StarredCacheRecord): void {
   const payload: PersistedStarredCache = {
     key,
     fetchedAt: Date.now(),
@@ -195,31 +281,24 @@ function saveStarredCacheToSettings(key: string, record: StarredCacheRecord): vo
     fullSyncedAt: record.fullSyncedAt,
     repos: record.repos
   }
-  void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, JSON.stringify(payload), false)
+  const json = JSON.stringify(payload)
+  starredPersistQueue = chainCacheWrite(starredPersistQueue, () => writeCacheFile(STARRED_CACHE_FILE, json))
 }
 
 function setStarredCache(key: string, record: StarredCacheRecord): GitHubRepository[] {
   starredCache.set(key, record)
-  saveStarredCacheToSettings(key, record)
+  saveStarredCacheToDisk(key, record)
   return record.repos
 }
 
-async function loadListsCacheFromSettings(): Promise<void> {
-  if (!_api || !_bgCtx) return
-  try {
-    const raw = await _api.GetSetting(_bgCtx, LISTS_SETTING_KEY)
-    if (!raw) return
-    const data = JSON.parse(raw) as PersistedListsCache
-    if (!data?.key || !Array.isArray(data.lists) || !data.viewerLogin) return
-    if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
-    listsCache.set(data.key, { value: { viewerLogin: data.viewerLogin, lists: data.lists }, expiresAt: data.expiresAt })
-  } catch {
-    // malformed or missing
-  }
+function applyListsCache(raw: string): void {
+  const data = JSON.parse(raw) as PersistedListsCache
+  if (!data?.key || !Array.isArray(data.lists) || !data.viewerLogin) return
+  if (Date.now() - data.fetchedAt > STARRED_STALE_MAX_AGE_MS) return
+  listsCache.set(data.key, { value: { viewerLogin: data.viewerLogin, lists: data.lists }, expiresAt: data.expiresAt })
 }
 
-function saveListsCacheToSettings(key: string, result: StarListsResult, expiresAt: number): void {
-  if (!_api || !_bgCtx) return
+function saveListsCacheToDisk(key: string, result: StarListsResult, expiresAt: number): void {
   const payload: PersistedListsCache = {
     key,
     fetchedAt: Date.now(),
@@ -227,7 +306,8 @@ function saveListsCacheToSettings(key: string, result: StarListsResult, expiresA
     viewerLogin: result.viewerLogin,
     lists: result.lists
   }
-  void _api.SaveSetting(_bgCtx, LISTS_SETTING_KEY, JSON.stringify(payload), false)
+  const json = JSON.stringify(payload)
+  listsPersistQueue = chainCacheWrite(listsPersistQueue, () => writeCacheFile(LISTS_CACHE_FILE, json))
 }
 
 function getStarredCacheEntry(key: string): { repos: GitHubRepository[]; firstPageFresh: boolean; fullFresh: boolean } | null {
@@ -597,7 +677,7 @@ async function fetchSubjectState(url: string, subjectType: string, token: string
     const state = getNotificationSubjectStateFromApiData(subjectType, data)
     if (state) {
       setCached(subjectStateCache, url, state, subjectStateTtl(updatedAt, state))
-      saveStateCacheToSettings()
+      saveStateCacheToDisk()
     }
   } catch {
     // ignore errors for individual subject state fetches
@@ -887,7 +967,7 @@ async function refreshUserLists(settings: PluginSettings, cacheKey: string): Pro
 
     const result = { viewerLogin, lists }
     setCached(listsCache, cacheKey, result, LISTS_CACHE_TTL_MS)
-    saveListsCacheToSettings(cacheKey, result, Date.now() + LISTS_CACHE_TTL_MS)
+    saveListsCacheToDisk(cacheKey, result, Date.now() + LISTS_CACHE_TTL_MS)
     return result
   })().finally(() => {
     listsRefreshInFlight.delete(cacheKey)
@@ -1033,9 +1113,7 @@ export function invalidateNotificationCaches(): void {
 export function invalidateStarredCaches(): void {
   starredCache.clear()
   starredRefreshInFlight.clear()
-  if (_api && _bgCtx) {
-    void _api.SaveSetting(_bgCtx, STARRED_SETTING_KEY, "", false)
-  }
+  starredPersistQueue = chainCacheWrite(starredPersistQueue, () => deleteCacheFile(STARRED_CACHE_FILE))
 }
 
 export function invalidateUserListCaches(): void {
@@ -1043,9 +1121,7 @@ export function invalidateUserListCaches(): void {
   listItemsCache.clear()
   listsRefreshInFlight.clear()
   listItemsRefreshInFlight.clear()
-  if (_api && _bgCtx) {
-    void _api.SaveSetting(_bgCtx, LISTS_SETTING_KEY, "", false)
-  }
+  listsPersistQueue = chainCacheWrite(listsPersistQueue, () => deleteCacheFile(LISTS_CACHE_FILE))
 }
 
 export async function assignIssueToViewer(settings: PluginSettings, issue: GitHubIssue): Promise<void> {
